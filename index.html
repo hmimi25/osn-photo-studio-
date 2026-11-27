@@ -93,6 +93,21 @@
           <button class="link" id="logoClear" type="button">استعادة الافتراضي</button>
         </div>
       </div>
+      <div class="fld">
+        <span>غلاف مخصص: يُوضع فوق الصورة ويستبدل الغلاف الجاهز</span>
+        <div class="row">
+          <input type="file" id="coverFile" accept="image/*">
+          <button class="link" id="coverClear" type="button">حذف</button>
+        </div>
+      </div>
+      <div class="fld">
+        <span>صفحة ثانية مخصصة: تستبدل الصفحة المينيماليست</span>
+        <div class="row">
+          <input type="file" id="page2File" accept="image/*">
+          <button class="link" id="page2Clear" type="button">حذف</button>
+        </div>
+      </div>
+      <p class="hint">استخدم PNG بوسط شفاف: الجزء الشفاف تظهر منه الصورة. يعتمد التطبيق نسبة أبعاد الغلاف الذي ترفعه.</p>
     </section>
 
     <!-- 3. FILTER -->
@@ -114,10 +129,12 @@
     <section class="card">
       <h2><span>4</span> التصدير</h2>
       <label class="rng"><span>الجودة</span><input type="range" id="quality" min="60" max="100" value="92"><output></output></label>
-      <button class="cta" id="export" type="button">تحميل كل الصور (ZIP)</button>
+      <button class="cta" id="shareCur" type="button">مشاركة الصورة الحالية (فيسبوك...)</button>
+      <button class="cta alt" id="prepAll" type="button">تجهيز كل الصور للمشاركة</button>
+      <button class="cta alt" id="export" type="button">تحميل الكل (ZIP)</button>
       <div class="bar"><i id="barFill"></i></div>
       <p class="status" id="status"></p>
-      <p class="hint">كل المعالجة تتم داخل متصفحك، والصور لا تُرفع لأي خادم.</p>
+      <p class="hint">المشاركة تعمل من الهاتف (Chrome أو Safari): تفتح قائمة المشاركة فتختار فيسبوك. كل المعالجة داخل متصفحك والصور لا تُرفع لأي خادم.</p>
     </section>
   </aside>
 
@@ -129,11 +146,16 @@
     </div>
     <p class="empty" id="empty">القالب معروض على صورة تجريبية. اختر صورك لتظهر هنا.</p>
     <div class="strip" id="strip"></div>
+    <section class="results" id="results" hidden>
+      <div class="rhead"><h3>الصور الجاهزة</h3><button class="link" id="resClear" type="button">مسح المعرض</button></div>
+      <p class="hint">اضغط «مشاركة» لإرسال الصور إلى فيسبوك مباشرة، أو اضغط مطولًا على أي صورة لحفظها في هاتفك.</p>
+      <div class="rgrid" id="rgrid"></div>
+    </section>
   </main>
 
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="jszip.min.js"></script>
 <script src="logo-data.js"></script>
 <script src="app.js"></script>
 </body>

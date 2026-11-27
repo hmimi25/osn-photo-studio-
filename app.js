@@ -33,7 +33,7 @@ const PRESETS = {
 };
 
 /* ---------- state ---------- */
-const state = { items: [], cur: -1, preset: 'cinema', accent: '#38b6f0', logoImg: null, logoData: null, busy: false };
+const state = { items: [], cur: -1, preset: 'cinema', accent: '#38b6f0', logoImg: null, logoData: null, customCover: null, customPage2: null, results: [], busy: false };
 let defaultLogo = null;
 let placeholderCv = null;
 let thumbSrc = null;
@@ -65,6 +65,8 @@ function getOpts() {
     fit: $('#fit').value,
     accent: state.accent,
     logo: state.logoImg,
+    customCover: state.customCover,
+    customPage2: state.customPage2,
     filter: getFilter()
   };
 }
@@ -301,14 +303,18 @@ function pageMinimal(ctx, W, H, src, o, scale) {
   drawLogo(ctx, o, wx + ww - lg, base - lg, lg);
 }
 
+function overlayFor(page, o) { return page === 'cover' ? o.customCover : page === 'minimal' ? o.customPage2 : null; }
 function renderPage(src, page, o, scale) {
-  const [W, H] = FORMATS[o.format];
+  const ov = overlayFor(page, o);
+  let [W, H] = FORMATS[o.format];
+  if (ov) { W = 1080; H = Math.round(1080 * (ov.naturalHeight || ov.height) / (ov.naturalWidth || ov.width)); }
   const cv = document.createElement('canvas');
   cv.width = Math.round(W * scale); cv.height = Math.round(H * scale);
   const ctx = cv.getContext('2d');
   ctx.scale(cv.width / W, cv.height / H);
   ctx.imageSmoothingQuality = 'high';
-  if (page === 'cover') pageCover(ctx, W, H, src, o, scale);
+  if (ov) { drawPhotoWindow(ctx, src, 0, 0, W, H, o, scale, null); ctx.drawImage(ov, 0, 0, W, H); }
+  else if (page === 'cover') pageCover(ctx, W, H, src, o, scale);
   else if (page === 'minimal') pageMinimal(ctx, W, H, src, o, scale);
   else drawPhotoWindow(ctx, src, 0, 0, W, H, o, scale, null);
   return cv;
@@ -325,8 +331,8 @@ const fontsReady = (async () => {
 })();
 
 /* ---------- preview ---------- */
-let timer = 0, token = 0;
-function schedule() { clearTimeout(timer); timer = setTimeout(refresh, 60); }
+let timer = 0, token = 0, ver = 0, prepared = null;
+function schedule() { ver++; clearTimeout(timer); timer = setTimeout(refresh, 60); }
 
 async function refresh() {
   const my = ++token;
@@ -413,7 +419,7 @@ function addFiles(list) {
 function setStatus(t) { $('#status').textContent = t; }
 function download(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
-  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30000);
 }
 const toBlob = (cv, q) => new Promise(r => cv.toBlob(r, 'image/jpeg', q));
 const pad = (n, l = 3) => String(n).padStart(l, '0');
@@ -465,6 +471,112 @@ async function exportAll() {
   }
 }
 
+/* ---------- custom overlays ---------- */
+function setOverlay(key, dataUrl) {
+  const prop = key === 'cover' ? 'customCover' : 'customPage2';
+  const lsk = key === 'cover' ? 'osn-cover' : 'osn-page2';
+  if (!dataUrl) { state[prop] = null; try { localStorage.removeItem(lsk); } catch (e) { /* ignore */ } schedule(); return; }
+  const img = new Image();
+  img.onload = () => {
+    state[prop] = img;
+    try { localStorage.setItem(lsk, dataUrl); } catch (e) { setStatus('الغلاف يعمل الآن، لكن حجمه كبير فلن يُحفظ للمرة القادمة.'); }
+    schedule();
+  };
+  img.onerror = () => setStatus('تعذّر قراءة صورة الغلاف.');
+  img.src = dataUrl;
+}
+
+/* ---------- share + results gallery ---------- */
+const safeBase = it => it.file.name.replace(/\.[^.]+$/, '').replace(/[^\w\u0600-\u06FF-]+/g, '_').slice(0, 40) || 'photo';
+const toFile = (blob, name) => new File([blob], name, { type: 'image/jpeg' });
+const canShareFiles = files => { try { return !!(navigator.canShare && navigator.canShare({ files })); } catch (e) { return false; } };
+const lockUI = on => { state.busy = on; ['#shareCur', '#prepAll', '#export'].forEach(s => { $(s).disabled = on; }); };
+
+async function shareFiles(files) {
+  if (!canShareFiles(files)) {
+    setStatus('المشاركة المباشرة غير مدعومة في هذا المتصفح. افتح التطبيق من الهاتف (Chrome أو Safari) أو استخدم الحفظ.');
+    return false;
+  }
+  try { await navigator.share({ files }); return true; }
+  catch (e) { if (e && e.name === 'AbortError') return false; throw e; }
+}
+function reportShareError(e) {
+  if (e && e.name === 'NotAllowedError') setStatus('الصور جاهزة. اضغط الزر مرة أخرى للمشاركة.');
+  else setStatus('تعذّرت المشاركة: ' + (e && e.message ? e.message : e));
+}
+
+async function shareCurrent() {
+  if (state.busy) return;
+  const it = state.items[state.cur];
+  if (!it) { setStatus('اختر صورة أولاً.'); return; }
+  const pages = selectedPages();
+  if (!pages.length) { setStatus('اختر صفحة واحدة على الأقل.'); return; }
+  let files;
+  if (prepared && prepared.v === ver && prepared.i === state.cur) files = prepared.files;
+  else {
+    lockUI(true); setStatus('جاري تجهيز الصور…');
+    try {
+      await fontsReady;
+      const o = getOpts(), q = +$('#quality').value / 100, bmp = await loadBitmap(it.file), base = safeBase(it);
+      files = [];
+      for (const page of pages) files.push(toFile(await toBlob(renderPage(bmp, page, o, 1), q), `${base}_${page}.jpg`));
+      if (bmp.close) bmp.close();
+      prepared = { v: ver, i: state.cur, files };
+    } catch (e) { console.error(e); setStatus('حدث خطأ أثناء التجهيز: ' + e.message); lockUI(false); return; }
+    lockUI(false);
+  }
+  try { const ok = await shareFiles(files); if (ok) setStatus('تمت المشاركة.'); }
+  catch (e) { reportShareError(e); }
+}
+
+function clearResults() {
+  state.results.forEach(g => g.files.forEach(f => URL.revokeObjectURL(f.url)));
+  state.results = []; $('#rgrid').replaceChildren(); $('#results').hidden = true;
+}
+
+function addGroupCard(g) {
+  $('#results').hidden = false;
+  const d = document.createElement('div'); d.className = 'rc';
+  const imgs = document.createElement('div'); imgs.className = 'rimgs';
+  g.files.forEach(f => { const im = new Image(); im.src = f.url; im.alt = f.name; imgs.append(im); });
+  const row = document.createElement('div'); row.className = 'rb';
+  const sh = document.createElement('button'); sh.type = 'button'; sh.className = 'sh'; sh.textContent = g.files.length > 1 ? 'مشاركة الكل' : 'مشاركة';
+  sh.addEventListener('click', async () => {
+    try { const ok = await shareFiles(g.files.map(f => toFile(f.blob, f.name))); if (ok) setStatus('تمت المشاركة.'); }
+    catch (e) { reportShareError(e); }
+  });
+  const sv = document.createElement('button'); sv.type = 'button'; sv.className = 'sv'; sv.textContent = 'حفظ';
+  sv.addEventListener('click', async () => { for (const f of g.files) { download(f.blob, f.name); await sleep(400); } });
+  row.append(sh, sv); d.append(imgs, row); $('#rgrid').append(d);
+}
+
+async function prepareAll() {
+  if (state.busy) return;
+  if (!state.items.length) { setStatus('اختر صورًا أولاً.'); return; }
+  const pages = selectedPages();
+  if (!pages.length) { setStatus('اختر صفحة واحدة على الأقل.'); return; }
+  lockUI(true); clearResults();
+  const total = state.items.length * pages.length; let done = 0;
+  try {
+    await fontsReady;
+    const o = getOpts(), q = +$('#quality').value / 100;
+    for (let i = 0; i < state.items.length; i++) {
+      const it = state.items[i], base = safeBase(it), bmp = await loadBitmap(it.file), g = { files: [] };
+      for (const page of pages) {
+        const blob = await toBlob(renderPage(bmp, page, o, 1), q);
+        g.files.push({ name: `${String(i + 1).padStart(3, '0')}_${base}_${page}.jpg`, blob, url: URL.createObjectURL(blob) });
+        done++; $('#barFill').style.width = (done / total * 100) + '%'; setStatus(`${done} / ${total}`);
+        await sleep(0);
+      }
+      if (bmp.close) bmp.close();
+      state.results.push(g); addGroupCard(g);
+    }
+    setStatus(`جاهزة: ${total} صورة. اضغط «مشاركة» تحت أي صورة في المعرض.`);
+    $('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) { console.error(e); setStatus('حدث خطأ أثناء التجهيز: ' + e.message); }
+  finally { lockUI(false); }
+}
+
 /* ---------- persistence ---------- */
 const SAVE = ['title', 'sub', 'cat', 'club', 'motto', 'showMotto', 'font', 'format', 'fit', 'pgCover', 'pgMin', 'pgPhoto',
   'intensity', 'bri', 'con', 'sat', 'warm', 'grain', 'vig', 'bars', 'quality'];
@@ -484,6 +596,8 @@ function restore() {
     }
     const logo = localStorage.getItem('osn-logo');
     if (logo) setLogo(logo); else useDefaultLogo();
+    const c1 = localStorage.getItem('osn-cover'); if (c1) setOverlay('cover', c1);
+    const c2 = localStorage.getItem('osn-page2'); if (c2) setOverlay('page2', c2);
   } catch (e) { /* ignore */ }
 }
 function useDefaultLogo() {
@@ -532,6 +646,16 @@ function init() {
   $('#logoClear').addEventListener('click', () => { $('#logoFile').value = ''; setLogo(null); });
 
   $('#export').addEventListener('click', exportAll);
+  $('#shareCur').addEventListener('click', shareCurrent);
+  $('#prepAll').addEventListener('click', prepareAll);
+  $('#resClear').addEventListener('click', clearResults);
+  const readTo = (id, key) => $(id).addEventListener('change', e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader(); r.onload = () => setOverlay(key, r.result); r.readAsDataURL(f);
+  });
+  readTo('#coverFile', 'cover'); readTo('#page2File', 'page2');
+  $('#coverClear').addEventListener('click', () => { $('#coverFile').value = ''; setOverlay('cover', null); });
+  $('#page2Clear').addEventListener('click', () => { $('#page2File').value = ''; setOverlay('page2', null); });
 
   renderPresetThumbs();
   updateCount();
