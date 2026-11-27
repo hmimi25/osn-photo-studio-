@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OSN Photo Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Big+Shoulders+Display:wght@900&family=Bebas+Neue&family=Russo+One&family=Barlow+Condensed:wght@700&family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <aside class="panel">
+    <div class="brand">
+      <img class="mark" src="crest.png" alt="OSN">
+      <div>
+        <h1>استوديو صور OSN</h1>
+        <p>قالب النادي + فلاتر سينمائية على كل صورك دفعة واحدة</p>
+      </div>
+    </div>
+
+    <!-- 1. PHOTOS -->
+    <section class="card">
+      <h2><span>1</span> الصور</h2>
+      <label class="drop" id="drop">
+        <input id="files" type="file" accept="image/*" multiple hidden>
+        <b>اضغط لاختيار الصور</b>
+        <small>أو اسحبها وأفلتها هنا (عدد غير محدود)</small>
+      </label>
+      <div class="row"><span id="count">0 صورة</span><button class="link" id="clear" type="button">مسح الكل</button></div>
+    </section>
+
+    <!-- 2. TEMPLATE -->
+    <section class="card">
+      <h2><span>2</span> القالب</h2>
+      <div class="checks">
+        <label><input type="checkbox" id="pgCover" checked> الغلاف</label>
+        <label><input type="checkbox" id="pgMin" checked> الصفحة المينيماليست</label>
+        <label><input type="checkbox" id="pgPhoto"> الصورة فقط (فلتر بدون قالب)</label>
+      </div>
+
+      <label class="fld"><span>العنوان الكبير</span><input id="title" value="TRAINING"></label>
+      <label class="fld"><span>سطر فرعي</span><input id="sub" value="SESSION 01 • 2026"></label>
+      <div class="two">
+        <label class="fld"><span>الفئة</span><input id="cat" value="U10"></label>
+        <label class="fld"><span>الخط</span>
+          <select id="font">
+            <option>Anton</option>
+            <option>Big Shoulders Display</option>
+            <option>Bebas Neue</option>
+            <option>Russo One</option>
+          </select>
+        </label>
+      </div>
+      <label class="fld"><span>اسم النادي</span><input id="club" value="OLYMPIC SPORTS NEDROMA"></label>
+      <label class="fld"><span>الشعار العربي</span><input id="motto" value="نربي قبل ما نعلم"></label>
+      <label class="chk"><input type="checkbox" id="showMotto" checked> إظهار الشعار العربي</label>
+
+      <div class="fld">
+        <span>لون التمييز</span>
+        <div class="sw">
+          <button type="button" data-c="#38b6f0" style="background:#38b6f0" title="أزرق سماوي"></button>
+          <button type="button" data-c="#e8ff00" style="background:#e8ff00" title="أصفر كهربائي"></button>
+          <button type="button" data-c="#d4a937" style="background:#d4a937" title="ذهبي"></button>
+          <button type="button" data-c="#ffffff" style="background:#ffffff" title="أبيض"></button>
+          <input type="color" id="accentPick" value="#38b6f0" title="لون مخصص">
+        </div>
+      </div>
+
+      <div class="two">
+        <label class="fld"><span>المقاس</span>
+          <select id="format">
+            <option value="4:5">4:5 (انستغرام)</option>
+            <option value="1:1">1:1 (مربع)</option>
+            <option value="9:16">9:16 (ستوري)</option>
+          </select>
+        </label>
+        <label class="fld"><span>الإطار</span>
+          <select id="fit">
+            <option value="cover">ملء الإطار</option>
+            <option value="contain">الصورة كاملة</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="fld">
+        <span>الشعار (الافتراضي: شعار OSN، ارفع غيره لاستبداله)</span>
+        <div class="row">
+          <input type="file" id="logoFile" accept="image/*">
+          <button class="link" id="logoClear" type="button">استعادة الافتراضي</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. FILTER -->
+    <section class="card">
+      <h2><span>3</span> الفلتر السينمائي</h2>
+      <div class="presets" id="presets"></div>
+
+      <label class="rng"><span>الشدة</span><input type="range" id="intensity" min="0" max="100" value="100"><output></output></label>
+      <label class="rng"><span>السطوع</span><input type="range" id="bri" min="-30" max="30" value="0"><output></output></label>
+      <label class="rng"><span>التباين</span><input type="range" id="con" min="-30" max="30" value="0"><output></output></label>
+      <label class="rng"><span>التشبع</span><input type="range" id="sat" min="-60" max="60" value="0"><output></output></label>
+      <label class="rng"><span>دفء/برودة</span><input type="range" id="warm" min="-100" max="100" value="0"><output></output></label>
+      <label class="rng"><span>حبيبات الفيلم</span><input type="range" id="grain" min="0" max="100" value="25"><output></output></label>
+      <label class="rng"><span>تعتيم الأطراف</span><input type="range" id="vig" min="0" max="100" value="35"><output></output></label>
+      <label class="chk"><input type="checkbox" id="bars"> شرائط سينمائية (2.39:1)</label>
+    </section>
+
+    <!-- 4. EXPORT -->
+    <section class="card">
+      <h2><span>4</span> التصدير</h2>
+      <label class="rng"><span>الجودة</span><input type="range" id="quality" min="60" max="100" value="92"><output></output></label>
+      <button class="cta" id="export" type="button">تحميل كل الصور (ZIP)</button>
+      <div class="bar"><i id="barFill"></i></div>
+      <p class="status" id="status"></p>
+      <p class="hint">كل المعالجة تتم داخل متصفحك، والصور لا تُرفع لأي خادم.</p>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <div class="previews" id="previews">
+      <figure class="sheet" id="sheetCover"><div class="holder"></div><figcaption>الغلاف</figcaption></figure>
+      <figure class="sheet" id="sheetMin"><div class="holder"></div><figcaption>المينيماليست</figcaption></figure>
+      <figure class="sheet" id="sheetPhoto"><div class="holder"></div><figcaption>الصورة فقط</figcaption></figure>
+    </div>
+    <p class="empty" id="empty">القالب معروض على صورة تجريبية. اختر صورك لتظهر هنا.</p>
+    <div class="strip" id="strip"></div>
+  </main>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="logo-data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
