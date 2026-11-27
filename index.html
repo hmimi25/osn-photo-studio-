@@ -2,12 +2,22 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>OSN Photo Studio</title>
+<meta name="description" content="قالب نادي أولمبي الرياضي ندرومة وفلاتر رياضية على كل صورك، ثم مشاركتها مباشرة على فيسبوك.">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a0d12">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="OSN Studio">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="format-detection" content="telephone=no">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Big+Shoulders+Display:wght@900&family=Bebas+Neue&family=Russo+One&family=Barlow+Condensed:wght@700&family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">
-<link rel="icon" type="image/png" href="favicon.png">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -18,145 +28,108 @@
       <img class="mark" src="crest.png" alt="OSN">
       <div>
         <h1>استوديو صور OSN</h1>
-        <p>قالب النادي + فلاتر سينمائية على كل صورك دفعة واحدة</p>
+        <p>قالب النادي + فلاتر رياضية على كل صورك</p>
       </div>
     </div>
+    <button class="cta alt inst" id="installBtn" type="button" hidden>📲 ثبّت التطبيق على هاتفك</button>
+    <p class="hint iosHint" id="iosHint" hidden></p>
 
-    <!-- 1. PHOTOS -->
     <section class="card">
-      <h2><span>1</span> الصور</h2>
-      <label class="drop" id="drop">
-        <input id="files" type="file" accept="image/*" multiple hidden>
-        <b>اضغط لاختيار الصور</b>
-        <small>أو اسحبها وأفلتها هنا (عدد غير محدود)</small>
-      </label>
-      <div class="row"><span id="count">0 صورة</span><button class="link" id="clear" type="button">مسح الكل</button></div>
-    </section>
-
-    <!-- 2. TEMPLATE -->
-    <section class="card">
-      <h2><span>2</span> القالب</h2>
-      <div class="checks">
-        <label><input type="checkbox" id="pgCover" checked> الغلاف</label>
-        <label><input type="checkbox" id="pgMin" checked> الصفحة المينيماليست</label>
-        <label><input type="checkbox" id="pgPhoto"> الصورة فقط (فلتر بدون قالب)</label>
-      </div>
-
-      <label class="fld"><span>العنوان الكبير</span><input id="title" value="TRAINING"></label>
-      <label class="fld"><span>سطر فرعي</span><input id="sub" value="SESSION 01 • 2026"></label>
-      <div class="two">
-        <label class="fld"><span>الفئة</span><input id="cat" value="U10"></label>
-        <label class="fld"><span>الخط</span>
-          <select id="font">
-            <option>Anton</option>
-            <option>Big Shoulders Display</option>
-            <option>Bebas Neue</option>
-            <option>Russo One</option>
-          </select>
-        </label>
-      </div>
-      <label class="fld"><span>اسم النادي</span><input id="club" value="OLYMPIC SPORTS NEDROMA"></label>
-      <label class="fld"><span>الشعار العربي</span><input id="motto" value="نربي قبل ما نعلم"></label>
-      <label class="chk"><input type="checkbox" id="showMotto" checked> إظهار الشعار العربي</label>
-
-      <div class="fld">
-        <span>لون التمييز</span>
-        <div class="sw">
-          <button type="button" data-c="#38b6f0" style="background:#38b6f0" title="أزرق سماوي"></button>
-          <button type="button" data-c="#e8ff00" style="background:#e8ff00" title="أصفر كهربائي"></button>
-          <button type="button" data-c="#d4a937" style="background:#d4a937" title="ذهبي"></button>
-          <button type="button" data-c="#ffffff" style="background:#ffffff" title="أبيض"></button>
-          <input type="color" id="accentPick" value="#38b6f0" title="لون مخصص">
-        </div>
-      </div>
-
-      <div class="two">
-        <label class="fld"><span>المقاس</span>
-          <select id="format">
-            <option value="4:5">4:5 (انستغرام)</option>
-            <option value="1:1">1:1 (مربع)</option>
-            <option value="9:16">9:16 (ستوري)</option>
-          </select>
-        </label>
-        <label class="fld"><span>الإطار</span>
-          <select id="fit">
-            <option value="cover">ملء الإطار</option>
-            <option value="contain">الصورة كاملة</option>
-          </select>
-        </label>
-      </div>
-
-      <div class="fld">
-        <span>الشعار (الافتراضي: شعار OSN، ارفع غيره لاستبداله)</span>
-        <div class="row">
-          <input type="file" id="logoFile" accept="image/*">
-          <button class="link" id="logoClear" type="button">استعادة الافتراضي</button>
-        </div>
+      <h2>القوالب</h2>
+      <div class="tpls">
+        <figure><img id="tpCover" src="cover.png" alt=""><figcaption>الغلاف (صورة واحدة)</figcaption></figure>
+        <figure><img id="tpMin" src="minimal.png" alt=""><figcaption>المينيماليست (البقية)</figcaption></figure>
       </div>
       <div class="fld">
-        <span>غلاف مخصص: يُوضع فوق الصورة ويستبدل الغلاف الجاهز</span>
+        <span>غلاف مخصص (PNG بوسط شفاف)</span>
         <div class="row">
           <input type="file" id="coverFile" accept="image/*">
-          <button class="link" id="coverClear" type="button">حذف</button>
+          <button class="link" id="coverClear" type="button">الافتراضي</button>
         </div>
       </div>
       <div class="fld">
-        <span>صفحة ثانية مخصصة: تستبدل الصفحة المينيماليست</span>
+        <span>مينيماليست مخصص (PNG بوسط شفاف)</span>
         <div class="row">
-          <input type="file" id="page2File" accept="image/*">
-          <button class="link" id="page2Clear" type="button">حذف</button>
+          <input type="file" id="minFile" accept="image/*">
+          <button class="link" id="minClear" type="button">الافتراضي</button>
         </div>
       </div>
-      <p class="hint">استخدم PNG بوسط شفاف: الجزء الشفاف تظهر منه الصورة. يعتمد التطبيق نسبة أبعاد الغلاف الذي ترفعه.</p>
+      <label class="fld"><span>ملاءمة الصورة داخل القالب</span>
+        <select id="fit">
+          <option value="cover">ملء الإطار</option>
+          <option value="contain">الصورة كاملة</option>
+        </select>
+      </label>
     </section>
 
-    <!-- 3. FILTER -->
     <section class="card">
-      <h2><span>3</span> الفلتر السينمائي</h2>
-      <div class="presets" id="presets"></div>
-
-      <label class="rng"><span>الشدة</span><input type="range" id="intensity" min="0" max="100" value="100"><output></output></label>
-      <label class="rng"><span>السطوع</span><input type="range" id="bri" min="-30" max="30" value="0"><output></output></label>
-      <label class="rng"><span>التباين</span><input type="range" id="con" min="-30" max="30" value="0"><output></output></label>
-      <label class="rng"><span>التشبع</span><input type="range" id="sat" min="-60" max="60" value="0"><output></output></label>
-      <label class="rng"><span>دفء/برودة</span><input type="range" id="warm" min="-100" max="100" value="0"><output></output></label>
-      <label class="rng"><span>حبيبات الفيلم</span><input type="range" id="grain" min="0" max="100" value="25"><output></output></label>
-      <label class="rng"><span>تعتيم الأطراف</span><input type="range" id="vig" min="0" max="100" value="35"><output></output></label>
-      <label class="chk"><input type="checkbox" id="bars"> شرائط سينمائية (2.39:1)</label>
-    </section>
-
-    <!-- 4. EXPORT -->
-    <section class="card">
-      <h2><span>4</span> التصدير</h2>
+      <h2>جودة الصور</h2>
       <label class="rng"><span>الجودة</span><input type="range" id="quality" min="60" max="100" value="92"><output></output></label>
-      <button class="cta" id="shareCur" type="button">مشاركة الصورة الحالية (فيسبوك...)</button>
-      <button class="cta alt" id="prepAll" type="button">تجهيز كل الصور للمشاركة</button>
-      <button class="cta alt" id="export" type="button">تحميل الكل (ZIP)</button>
-      <div class="bar"><i id="barFill"></i></div>
-      <p class="status" id="status"></p>
-      <p class="hint">المشاركة تعمل من الهاتف (Chrome أو Safari): تفتح قائمة المشاركة فتختار فيسبوك. كل المعالجة داخل متصفحك والصور لا تُرفع لأي خادم.</p>
+      <p class="hint">كل المعالجة داخل متصفحك، والصور لا تُرفع لأي خادم.</p>
     </section>
   </aside>
 
   <main class="stage">
-    <div class="previews" id="previews">
-      <figure class="sheet" id="sheetCover"><div class="holder"></div><figcaption>الغلاف</figcaption></figure>
-      <figure class="sheet" id="sheetMin"><div class="holder"></div><figcaption>المينيماليست</figcaption></figure>
-      <figure class="sheet" id="sheetPhoto"><div class="holder"></div><figcaption>الصورة فقط</figcaption></figure>
-    </div>
-    <p class="empty" id="empty">القالب معروض على صورة تجريبية. اختر صورك لتظهر هنا.</p>
+    <section class="card pics">
+      <label class="drop" id="drop">
+        <input id="files" type="file" accept="image/*" multiple hidden>
+        <b>＋ اختر صورك</b>
+        <small>اختر عدة صور دفعة واحدة، أو اسحبها وأفلتها هنا</small>
+      </label>
+      <div class="row"><span id="count">0 صورة</span><button class="link" id="clear" type="button">مسح الكل</button></div>
+      <p class="hint">يختار التطبيق تلقائيًا أفضل صورة (الأوضح والأفضل إضاءة) لتأخذ غلاف TRAINING الكبير، وكل الباقي يأخذ القالب المينيماليست. لكل صورة تصميم واحد فقط.</p>
+    </section>
+
     <div class="strip" id="strip"></div>
+    <div class="acts">
+      <button class="cta alt" id="setCover" type="button" hidden>⭐ اجعلها هي الغلاف</button>
+      <button class="cta alt" id="autoCover" type="button" hidden>↺ اختيار تلقائي</button>
+    </div>
+
+    <figure class="sheet">
+      <div class="holder" id="holder"></div>
+      <figcaption id="cap"></figcaption>
+      <button class="cta alt cmp" id="cmp" type="button" hidden>👁 اضغط مطولًا: قبل الفلتر</button>
+    </figure>
+    <p class="empty" id="empty">القالب معروض على صورة تجريبية. اختر صورك لتظهر هنا.</p>
+
+    <section class="card filters">
+      <h2>الفلاتر الرياضية والسينمائية</h2>
+      <div class="cats" id="cats"></div>
+      <div class="presets" id="presets"></div>
+      <p class="hint">كل فلتر يظهر مباشرة على صورتك قبل اختياره. على الحاسوب مرّر الفأرة فوقه لمعاينته.</p>
+      <details class="adv">
+        <summary>ضبط يدوي</summary>
+        <label class="rng"><span>الشدة</span><input type="range" id="intensity" min="0" max="100" value="100"><output></output></label>
+        <label class="rng"><span>السطوع</span><input type="range" id="bri" min="-30" max="30" value="0"><output></output></label>
+        <label class="rng"><span>التباين</span><input type="range" id="con" min="-30" max="30" value="0"><output></output></label>
+        <label class="rng"><span>التشبع</span><input type="range" id="sat" min="-60" max="60" value="0"><output></output></label>
+        <label class="rng"><span>دفء/برودة</span><input type="range" id="warm" min="-100" max="100" value="0"><output></output></label>
+        <label class="rng"><span>حبيبات الفيلم</span><input type="range" id="grain" min="0" max="100" value="25"><output></output></label>
+        <label class="rng"><span>الحدة</span><input type="range" id="sharp" min="0" max="100" value="50"><output></output></label>
+        <label class="rng"><span>تعتيم الأطراف</span><input type="range" id="vig" min="0" max="100" value="35"><output></output></label>
+      </details>
+    </section>
+
     <section class="results" id="results" hidden>
       <div class="rhead"><h3>الصور الجاهزة</h3><button class="link" id="resClear" type="button">مسح المعرض</button></div>
-      <p class="hint">اضغط «مشاركة» لإرسال الصور إلى فيسبوك مباشرة، أو اضغط مطولًا على أي صورة لحفظها في هاتفك.</p>
+      <p class="hint">هذه هي الصور النهائية بالترتيب الذي ستُنشر به: الغلاف أولًا. اضغط مطولًا على أي صورة لحفظها، أو استخدم زر «حفظ».</p>
       <div class="rgrid" id="rgrid"></div>
     </section>
   </main>
 
 </div>
 
+<div class="dock">
+  <p class="status" id="status"></p>
+  <div class="bar"><i id="barFill"></i></div>
+  <div class="dbtns">
+    <button class="cta" id="shareAll" type="button">مشاركة الكل على فيسبوك</button>
+    <button class="cta alt" id="export" type="button">ZIP</button>
+  </div>
+</div>
+
 <script src="jszip.min.js"></script>
-<script src="logo-data.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

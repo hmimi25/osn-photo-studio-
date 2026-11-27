@@ -5,41 +5,89 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const smooth = (a, b, x) => { x = Math.min(1, Math.max(0, (x - a) / (b - a))); return x * x * (3 - 2 * x); };
-const setLS = (ctx, px) => { if ('letterSpacing' in ctx) ctx.letterSpacing = px + 'px'; };
-const rr = (ctx, x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h); };
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const smooth = (a, b, x) => { x = clamp((x - a) / (b - a)); return x * x * (3 - 2 * x); };
+const pad = (n, l = 2) => String(n).padStart(l, '0');
+const toBlob = (cv, q) => new Promise(r => cv.toBlob(r, 'image/jpeg', q));
 
-const INK = '#0b0b0b';
-const FORMATS = { '4:5': [1080, 1350], '1:1': [1080, 1080], '9:16': [1080, 1920] };
-const FONTS = { 'Anton': 400, 'Big Shoulders Display': 900, 'Bebas Neue': 400, 'Russo One': 400 };
+const OUT_W = 1080;
 const PREVIEW_SCALE = 0.45;
 const ZIP_PART = 40;
+const SHARE_BATCH = 10;
+const PREP_DELAY = 1200;
+const DEFAULT_SRC = { cover: 'cover.png', minimal: 'minimal.png' };
+const LS_KEY = { cover: 'osn-cover', minimal: 'osn-page2' };
 
-/* ---------- cinematic presets ---------- */
-const N = { bright: 1, contrast: 1, sat: 1, shadow: [0, 0, 0], hi: [0, 0, 0], fade: 0, grain: 0, vig: 0, warm: 0 };
-const P = (name, o) => ({ ...N, name, ...o });
+/* ---------- sports + cinematic filters (48) ---------- */
+const N = { bright: 1, contrast: 1, sat: 1, shadow: [0, 0, 0], hi: [0, 0, 0], fade: 0, grain: 0, vig: 0, warm: 0, grass: 0, sky: 0, duo: 0, dk: [0, 0, 0], lt: [1, 1, 1], sharp: 0, glow: 0, clarity: 0 };
+const P = (cat, name, o) => ({ ...N, cat, name, ...o });
+const CATS = { all: 'الكل', sport: 'رياضي', cine: 'سينمائي', color: 'ألوان', bw: 'أبيض وأسود', fx: 'تأثيرات' };
 const PRESETS = {
-  none:     P('بدون فلتر', {}),
-  cinema:   P('Teal & Orange', { contrast: 1.15, sat: 1.12, shadow: [-.03, .05, .08], hi: [.08, .03, -.07], fade: .02, grain: .25, vig: .35 }),
-  osn:      P('OSN أزرق', { contrast: 1.15, sat: 1.05, shadow: [-.03, .03, .09], hi: [0, .05, .08], grain: .2, vig: .35 }),
-  golden:   P('الساعة الذهبية', { bright: 1.03, contrast: 1.1, sat: 1.08, shadow: [.03, .01, -.02], hi: [.09, .04, -.05], fade: .02, grain: .15, vig: .3 }),
-  noir:     P('أبيض وأسود نوار', { bright: .98, contrast: 1.3, sat: 0, fade: .03, grain: .35, vig: .5 }),
-  cold:     P('فولاذ بارد', { contrast: 1.15, sat: .85, shadow: [-.02, 0, .06], hi: [-.02, .02, .05], grain: .2, vig: .3 }),
-  matte:    P('مات فيلم', { contrast: 1.05, sat: .9, shadow: [.01, .02, .03], hi: [.04, .02, 0], fade: .09, grain: .25, vig: .2 }),
-  kodak:    P('كوداك قديم', { sat: 1.05, shadow: [.02, .03, -.01], hi: [.08, .05, -.02], fade: .06, grain: .4, vig: .3 }),
-  stadium:  P('ليل الملعب', { bright: .92, contrast: 1.25, sat: 1.15, shadow: [-.01, 0, .06], hi: [.03, .04, .08], grain: .2, vig: .5 }),
-  bleach:   P('Bleach Bypass', { contrast: 1.35, sat: .55, grain: .3, vig: .35 }),
-  electric: P('أصفر كهربائي', { contrast: 1.2, sat: 1.1, shadow: [0, 0, .03], hi: [.09, .08, -.06], grain: .15, vig: .3 })
+  none:       P('all',   'بدون فلتر', {}),
+  // رياضي
+  pro:        P('sport', 'ستاد برو', { contrast: 1.2, sat: 1.2, grass: .3, sharp: .5, vig: .3, grain: .1 }),
+  broadcast:  P('sport', 'بث تلفزيوني HD', { bright: 1.03, contrast: 1.12, sat: 1.15, shadow: [-.01, 0, .03], hi: [.02, .02, .03], sharp: .6, vig: .15 }),
+  night:      P('sport', 'ليلة الأبطال', { bright: .95, contrast: 1.25, sat: 1.15, shadow: [-.02, 0, .08], hi: [.02, .04, .1], sharp: .3, vig: .55, grain: .15 }),
+  floodlight: P('sport', 'أضواء الملعب', { bright: 1.05, contrast: 1.18, sat: 1.12, hi: [.05, .05, .08], glow: .35, clarity: .4, vig: .35 }),
+  hdr:        P('sport', 'HDR أكشن', { contrast: 1.18, sat: 1.2, clarity: .9, sharp: .3, vig: .2 }),
+  speed:      P('sport', 'سرعة', { contrast: 1.25, sat: .8, sharp: .8, clarity: .6, vig: .3, grain: .15 }),
+  derby:      P('sport', 'يوم الديربي', { contrast: 1.25, sat: 1.2, warm: .2, clarity: .5, vig: .4, grain: .15 }),
+  redzone:    P('sport', 'أحمر الحماس', { contrast: 1.25, sat: 1.2, shadow: [.05, -.02, -.02], hi: [.1, 0, -.02], vig: .45, sharp: .3 }),
+  grass:      P('sport', 'عشب أخضر', { contrast: 1.15, sat: 1.1, grass: .9, hi: [.03, .04, -.02], sharp: .4, vig: .25 }),
+  victory:    P('sport', 'مجد الفوز', { bright: 1.04, contrast: 1.2, sat: 1.25, hi: [.1, .07, -.02], sharp: .45, vig: .3 }),
+  clean:      P('sport', 'نهار ساطع', { bright: 1.08, contrast: 1.05, sat: 1.15, hi: [.04, .03, 0], sharp: .3, vig: .1 }),
+  training:   P('sport', 'تدريب نقي', { bright: 1.02, contrast: 1.08, sat: 1.08, sharp: .35, vig: .15 }),
+  sharp:      P('sport', 'حدة عالية', { contrast: 1.12, sat: 1.1, sharp: 1, vig: .15 }),
+  skyblue:    P('sport', 'سماء زرقاء', { contrast: 1.15, sat: 1.1, sky: .8, sharp: .3, vig: .2 }),
+  osn:        P('sport', 'OSN أزرق', { contrast: 1.15, sat: 1.05, shadow: [-.03, .03, .09], hi: [0, .05, .08], sky: .5, grain: .2, vig: .35 }),
+  stadium:    P('sport', 'ليل الملعب', { bright: .92, contrast: 1.25, sat: 1.15, shadow: [-.01, 0, .06], hi: [.03, .04, .08], grain: .2, vig: .5 }),
+  sunset:     P('sport', 'غروب الملعب', { bright: 1.02, contrast: 1.12, sat: 1.2, shadow: [.04, 0, -.03], hi: [.12, .05, -.08], warm: .4, grain: .15, vig: .35 }),
+  // سينمائي
+  cinema:     P('cine',  'Teal & Orange', { contrast: 1.15, sat: 1.12, shadow: [-.03, .05, .08], hi: [.08, .03, -.07], fade: .02, grain: .25, vig: .35 }),
+  blockbuster:P('cine',  'بلوك باستر', { contrast: 1.2, sat: 1.15, shadow: [-.03, .04, .08], hi: [.08, .03, -.06], clarity: .45, vig: .4, grain: .15 }),
+  golden:     P('cine',  'الساعة الذهبية', { bright: 1.03, contrast: 1.1, sat: 1.08, shadow: [.03, .01, -.02], hi: [.09, .04, -.05], fade: .02, grain: .15, vig: .3 }),
+  moody:      P('cine',  'كئيب سينمائي', { contrast: 1.2, sat: .8, shadow: [-.03, .04, .04], hi: [.02, .03, 0], fade: .06, grain: .3, vig: .5 }),
+  dramatic:   P('cine',  'درامي داكن', { bright: .88, contrast: 1.4, sat: .85, shadow: [-.02, -.01, .02], sharp: .3, grain: .3, vig: .6 }),
+  street:     P('cine',  'شارع قاسي', { contrast: 1.35, sat: .6, fade: .04, sharp: .6, grain: .5, vig: .45 }),
+  fire:       P('cine',  'ناري', { contrast: 1.25, sat: 1.25, shadow: [.04, -.01, -.03], hi: [.12, .03, -.1], warm: .8, vig: .5, sharp: .3 }),
+  ice:        P('cine',  'جليدي', { contrast: 1.15, sat: .8, shadow: [-.03, 0, .07], hi: [-.03, .03, .1], warm: -.8, vig: .3, sharp: .3 }),
+  neon:       P('cine',  'نيون الليل', { contrast: 1.3, sat: 1.3, shadow: [.05, -.02, .08], hi: [-.03, .08, .06], vig: .5, grain: .2 }),
+  retro:      P('cine',  'كرة التسعينات', { contrast: 1.05, sat: .9, shadow: [.04, 0, .05], hi: [.1, .06, -.04], fade: .08, warm: .3, grain: .45, vig: .35 }),
+  kodak:      P('cine',  'كوداك قديم', { sat: 1.05, shadow: [.02, .03, -.01], hi: [.08, .05, -.02], fade: .06, grain: .4, vig: .3 }),
+  matte:      P('cine',  'مات فيلم', { contrast: 1.05, sat: .9, shadow: [.01, .02, .03], hi: [.04, .02, 0], fade: .09, grain: .25, vig: .2 }),
+  cold:       P('cine',  'فولاذ بارد', { contrast: 1.15, sat: .85, shadow: [-.02, 0, .06], hi: [-.02, .02, .05], grain: .2, vig: .3 }),
+  bleach:     P('cine',  'Bleach Bypass', { contrast: 1.35, sat: .55, grain: .3, vig: .35, sharp: .4 }),
+  // ألوان
+  electric:   P('color', 'أصفر كهربائي', { contrast: 1.2, sat: 1.1, shadow: [0, 0, .03], hi: [.09, .08, -.06], grain: .15, vig: .3 }),
+  duoOsn:     P('color', 'ثنائي OSN', { contrast: 1.15, duo: 1, dk: [.02, .05, .14], lt: [.65, .88, 1], vig: .3, grain: .15 }),
+  duoVolt:    P('color', 'أسود وأصفر', { contrast: 1.3, duo: 1, dk: [0, 0, 0], lt: [.91, 1, 0], grain: .2, vig: .3 }),
+  blackgold:  P('color', 'أسود وذهبي', { contrast: 1.2, duo: 1, dk: [.03, .02, 0], lt: [1, .85, .45], grain: .25, vig: .4 }),
+  duoRed:     P('color', 'أسود وأحمر', { contrast: 1.25, duo: 1, dk: [.06, 0, .02], lt: [1, .42, .3], grain: .2, vig: .4 }),
+  sepia:      P('color', 'سيبيا كلاسيك', { contrast: 1.05, duo: 1, dk: [.12, .07, .03], lt: [.98, .9, .72], grain: .3, vig: .4 }),
+  cross:      P('color', 'كروس بروسس', { contrast: 1.2, sat: 1.2, shadow: [0, .04, .08], hi: [.08, .04, -.1], fade: .03, grain: .2, vig: .3 }),
+  // أبيض وأسود
+  noir:       P('bw',    'أبيض وأسود نوار', { bright: .98, contrast: 1.3, sat: 0, fade: .03, grain: .35, vig: .5 }),
+  bwsport:    P('bw',    'أبيض وأسود رياضي', { contrast: 1.4, sat: 0, sharp: .6, grain: .3, vig: .4 }),
+  bwsoft:     P('bw',    'أبيض وأسود ناعم', { contrast: 1.08, sat: 0, fade: .08, glow: .3, grain: .3, vig: .3 }),
+  bwhard:     P('bw',    'أبيض وأسود قاسٍ', { contrast: 1.6, sat: 0, clarity: .8, grain: .4, vig: .6 }),
+  // تأثيرات
+  glow:       P('fx',    'وهج ناعم', { contrast: 1.05, sat: 1.1, glow: .7, vig: .2 }),
+  dream:      P('fx',    'حلم', { bright: 1.03, sat: 1.1, fade: .05, glow: 1, vig: .15 }),
+  detail:     P('fx',    'تفاصيل HDR', { contrast: 1.1, sat: 1.1, clarity: 1.3, sharp: .3 }),
+  darkframe:  P('fx',    'إطار داكن', { contrast: 1.1, vig: .9 }),
+  heavygrain: P('fx',    'حبيبات ثقيلة', { contrast: 1.1, fade: .04, grain: .85, vig: .25 })
 };
 
 /* ---------- state ---------- */
-const state = { items: [], cur: -1, preset: 'cinema', accent: '#38b6f0', logoImg: null, logoData: null, customCover: null, customPage2: null, results: [], busy: false };
-let defaultLogo = null;
-let placeholderCv = null;
-let thumbSrc = null;
+const state = { items: [], cur: -1, cover: 0, coverManual: false, preset: 'pro', cat: 'all', hover: null, compare: false, busy: false, prepCount: 0, scoring: 0 };
+const ov = { cover: null, minimal: null };
+const defaults = { cover: null, minimal: null };
+let ver = 0, prepared = null, prepPromise = null, prepVer = -1, prepTimer = 0, placeholderCv = null, deferredInstall = null;
 
 /* ---------- options ---------- */
 function getFilter() {
+  if (state.compare) return { ...N, intensity: 0 };
+  if (state.hover) return { ...PRESETS[state.hover], intensity: 1 };
   const p = PRESETS[state.preset];
   return {
     ...p,
@@ -47,45 +95,25 @@ function getFilter() {
     bright: p.bright * (1 + +$('#bri').value / 100),
     contrast: p.contrast * (1 + +$('#con').value / 100),
     sat: p.sat * (1 + +$('#sat').value / 100),
-    warm: +$('#warm').value / 100,
+    warm: p.warm + +$('#warm').value / 100,
     grain: +$('#grain').value / 100,
     vig: +$('#vig').value / 100,
-    bars: $('#bars').checked
+    sharp: +$('#sharp').value / 100
   };
 }
-function getOpts() {
-  return {
-    title: $('#title').value.trim() || 'TRAINING',
-    sub: $('#sub').value.trim(),
-    cat: $('#cat').value.trim(),
-    club: $('#club').value.trim() || 'OSN',
-    motto: $('#showMotto').checked ? $('#motto').value.trim() : '',
-    font: $('#font').value,
-    format: $('#format').value,
-    fit: $('#fit').value,
-    accent: state.accent,
-    logo: state.logoImg,
-    customCover: state.customCover,
-    customPage2: state.customPage2,
-    filter: getFilter()
-  };
-}
-const selectedPages = () => [
-  $('#pgCover').checked && 'cover',
-  $('#pgMin').checked && 'minimal',
-  $('#pgPhoto').checked && 'photo'
-].filter(Boolean);
+const getOpts = () => ({ fit: $('#fit').value, filter: getFilter() });
+const orderedIdx = () => {
+  const n = state.items.length; if (!n) return [];
+  const c = Math.min(state.cover, n - 1);
+  return [c, ...state.items.map((_, i) => i).filter(i => i !== c)];
+};
 
 /* ---------- image loading ---------- */
+const loadImg = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('load ' + src.slice(0, 40))); i.src = src; });
 async function loadBitmap(file) {
   try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { /* fallback */ }
   const url = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    return img;
-  } finally { setTimeout(() => URL.revokeObjectURL(url), 8000); }
+  try { return await loadImg(url); } finally { setTimeout(() => URL.revokeObjectURL(url), 8000); }
 }
 async function ensureWork(it) {
   if (it.work) return it.work;
@@ -93,12 +121,10 @@ async function ensureWork(it) {
   const s = Math.min(1, 1400 / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas');
   c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
-  const x = c.getContext('2d');
-  x.imageSmoothingQuality = 'high';
+  const x = c.getContext('2d'); x.imageSmoothingQuality = 'high';
   x.drawImage(bmp, 0, 0, c.width, c.height);
   if (bmp.close) bmp.close();
-  it.work = c;
-  return c;
+  it.work = c; return c;
 }
 function placeholder() {
   if (placeholderCv) return placeholderCv;
@@ -107,18 +133,83 @@ function placeholder() {
   const g = x.createLinearGradient(0, 0, 1400, 1000);
   g.addColorStop(0, '#1c3b52'); g.addColorStop(.55, '#6b8a9c'); g.addColorStop(1, '#d9a35b');
   x.fillStyle = g; x.fillRect(0, 0, 1400, 1000);
-  x.fillStyle = 'rgba(0,0,0,.35)';
-  x.beginPath(); x.arc(700, 470, 150, 0, 7); x.fill();
-  x.fillRect(560, 600, 280, 400);
+  x.fillStyle = 'rgba(0,0,0,.35)'; x.beginPath(); x.arc(700, 470, 150, 0, 7); x.fill(); x.fillRect(560, 600, 280, 400);
   return (placeholderCv = c);
 }
 
+/* ---------- picking the cover photo (sharpness, exposure, contrast, colour, framing) ---------- */
+async function scorePhoto(it) {
+  const bmp = await loadBitmap(it.file);
+  const iw = bmp.width, ih = bmp.height, s = 160 / Math.max(iw, ih);
+  const w = Math.max(8, Math.round(iw * s)), h = Math.max(8, Math.round(ih * s));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(bmp, 0, 0, w, h);
+  if (bmp.close) bmp.close();
+  const d = x.getImageData(0, 0, w, h).data, n = w * h, L = new Float32Array(n);
+  let sum = 0, clip = 0, chroma = 0;
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2], l = .2126 * r + .7152 * g + .0722 * b;
+    L[p] = l; sum += l; if (l < 12 || l > 243) clip++;
+    chroma += Math.max(r, g, b) - Math.min(r, g, b);
+  }
+  const mean = sum / n; let vr = 0;
+  for (let p = 0; p < n; p++) vr += (L[p] - mean) * (L[p] - mean);
+  const std = Math.sqrt(vr / n);
+  let lap = 0, wt = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let xx = 1; xx < w - 1; xx++) {
+      const p = y * w + xx, v = 4 * L[p] - L[p - 1] - L[p + 1] - L[p - w] - L[p + w];
+      const dx = (xx / w - .5) * 2, dy = (y / h - .5) * 2, cw = 1.6 - .9 * Math.min(1, Math.hypot(dx, dy));
+      lap += v * v * cw; wt += cw;
+    }
+  }
+  const sharpN = clamp(Math.log10(1 + lap / wt) / 3.2);
+  const expN = (1 - clamp(Math.abs(mean - 118) / 118)) * (1 - clamp((clip / n) * 2.5));
+  const conN = clamp(std / 70), colN = clamp((chroma / n) / 70);
+  const aspectN = 1 - clamp(Math.abs(Math.log((iw / ih) / .75)) / Math.log(2.2));
+  const resN = clamp((iw * ih) / 1.2e6);
+  return .38 * sharpN + .22 * expN + .14 * conN + .08 * colN + .10 * aspectN + .08 * resN;
+}
+function pickCover() {
+  let best = -1, bi = state.cover;
+  state.items.forEach((it, i) => { if (it.score != null && it.score > best) { best = it.score; bi = i; } });
+  if (best < 0) return;
+  state.cover = bi; renderStrip(); changed();
+}
+async function scoreNew(list) {
+  state.scoring++; setStatus('جاري اختيار أفضل صورة للغلاف…');
+  try {
+    for (const it of list) {
+      try { it.score = await scorePhoto(it); } catch (e) { it.score = 0; }
+      await sleep(0);
+    }
+  } finally { state.scoring--; }
+  if (!state.scoring) { if (!state.coverManual) pickCover(); else changed(); setStatus(''); }
+}
+
 /* ---------- grading ---------- */
+function boxBlur(src, w, h, r) {
+  const tmp = new Float32Array(w * h), out = new Float32Array(w * h), inv = 1 / (2 * r + 1);
+  const pass = (a, b, horiz) => {
+    const len = horiz ? w : h, cnt = horiz ? h : w, stride = horiz ? 1 : w, step = horiz ? w : 1;
+    for (let k = 0; k < cnt; k++) {
+      const base = k * step; let sum = 0;
+      for (let i = -r; i <= r; i++) sum += a[base + Math.min(len - 1, Math.max(0, i)) * stride];
+      for (let i = 0; i < len; i++) {
+        b[base + i * stride] = sum * inv;
+        sum += a[base + Math.min(len - 1, i + r + 1) * stride] - a[base + Math.max(0, i - r) * stride];
+      }
+    }
+  };
+  pass(src, tmp, true); pass(tmp, out, false); pass(out, tmp, true); pass(tmp, out, false);
+  return out;
+}
+
 function grade(ctx, w, h, f) {
-  if (!(f.intensity > 0) && !f.grain && !f.vig) return;
+  if (!(f.intensity > 0) && !f.grain && !f.vig && !f.sharp && !f.clarity && !f.glow) return;
   const id = ctx.getImageData(0, 0, w, h), d = id.data;
-  const k = f.intensity, [sr, sg, sb] = f.shadow, [hr, hg, hb] = f.hi;
-  const amp = f.grain * 0.16, vg = f.vig, fade = f.fade, warm = f.warm * 0.06;
+  const k = f.intensity, [sr, sg, sb] = f.shadow, [hr, hg, hb] = f.hi, fade = f.fade, warm = f.warm * 0.06, vg = f.vig;
+  const grass = f.grass, sky = f.sky, duo = f.duo, dk = f.dk, lt = f.lt;
   const cx = w / 2, cy = h / 2, inv = 1 / Math.hypot(cx, cy);
   for (let y = 0; y < h; y++) {
     const dy2 = (y - cy) * (y - cy);
@@ -127,22 +218,48 @@ function grade(ctx, w, h, f) {
       const or = d[i] / 255, og = d[i + 1] / 255, ob = d[i + 2] / 255;
       let r = or * f.bright, g = og * f.bright, b = ob * f.bright;
       r = (r - .5) * f.contrast + .5; g = (g - .5) * f.contrast + .5; b = (b - .5) * f.contrast + .5;
-      const l = .2126 * r + .7152 * g + .0722 * b;
+      let l = .2126 * r + .7152 * g + .0722 * b;
+      if (grass) { const gd = g - (r > b ? r : b); if (gd > 0) { const m = 1 + grass * Math.min(1, gd * 5); r = l + (r - l) * m; g = l + (g - l) * m; b = l + (b - l) * m; } }
+      if (sky) { const bd = b - (r > g ? r : g); if (bd > 0) { const m = 1 + sky * Math.min(1, bd * 5); r = l + (r - l) * m; g = l + (g - l) * m; b = l + (b - l) * m; } }
       r = l + (r - l) * f.sat; g = l + (g - l) * f.sat; b = l + (b - l) * f.sat;
+      if (duo) {
+        const lc = Math.min(1, Math.max(0, .2126 * r + .7152 * g + .0722 * b));
+        r += (dk[0] + (lt[0] - dk[0]) * lc - r) * duo; g += (dk[1] + (lt[1] - dk[1]) * lc - g) * duo; b += (dk[2] + (lt[2] - dk[2]) * lc - b) * duo;
+      }
+      l = .2126 * r + .7152 * g + .0722 * b;
       const sh = 1 - smooth(0, .6, l), hi = smooth(.4, 1, l);
       r += sr * sh + hr * hi + warm; g += sg * sh + hg * hi; b += sb * sh + hb * hi - warm;
       if (fade) { r = fade + r * (1 - fade); g = fade + g * (1 - fade); b = fade + b * (1 - fade); }
       r = or + (r - or) * k; g = og + (g - og) * k; b = ob + (b - ob) * k;
-      if (vg) {
-        const dx = x - cx, dd = Math.sqrt(dx * dx + dy2) * inv;
-        const v = 1 - vg * smooth(.35, 1, dd) * .85;
-        r *= v; g *= v; b *= v;
-      }
-      if (amp) {
-        const n = (Math.random() - .5) * 2 * amp * (1 - Math.abs(l - .5) * 1.1);
-        r += n; g += n; b += n;
-      }
+      if (vg) { const dx = x - cx, v = 1 - vg * smooth(.35, 1, Math.sqrt(dx * dx + dy2) * inv) * .85; r *= v; g *= v; b *= v; }
       d[i] = r * 255; d[i + 1] = g * 255; d[i + 2] = b * 255;
+    }
+  }
+  if (f.clarity || f.glow) {
+    const n = w * h, Lf = new Float32Array(n);
+    for (let p = 0, i = 0; p < n; p++, i += 4) Lf[p] = (d[i] * .2126 + d[i + 1] * .7152 + d[i + 2] * .0722) / 255;
+    const Lb = boxBlur(Lf, w, h, Math.max(2, Math.round(w * .02)));
+    for (let p = 0, i = 0; p < n; p++, i += 4) {
+      const diff = Lf[p] - Lb[p], mid = Math.max(.2, 1 - Math.abs(Lf[p] - .5) * 1.2);
+      const add = f.clarity * diff * 255 * mid * 1.1, gl = f.glow * Math.max(0, Lb[p] - .45) * 255;
+      d[i] += add + gl; d[i + 1] += add + gl * .95; d[i + 2] += add + gl * .85;
+    }
+  }
+  if (f.sharp) {
+    const src = new Uint8ClampedArray(d), kk = f.sharp * 0.6, w4 = w * 4;
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = (y * w + x) * 4;
+        for (let c = 0; c < 3; c++) { const j = i + c, v = src[j]; d[j] = v + kk * (4 * v - src[j - 4] - src[j + 4] - src[j - w4] - src[j + w4]); }
+      }
+    }
+  }
+  if (f.grain) {
+    const amp = f.grain * 255 * 0.16;
+    for (let i = 0; i < d.length; i += 4) {
+      const l = (d[i] * .2126 + d[i + 1] * .7152 + d[i + 2] * .0722) / 255;
+      const n = (Math.random() - .5) * 2 * amp * (1 - Math.abs(l - .5) * 1.1);
+      d[i] += n; d[i + 1] += n; d[i + 2] += n;
     }
   }
   ctx.putImageData(id, 0, 0);
@@ -156,201 +273,86 @@ function drawFit(ctx, img, w, h, mode) {
   ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
 }
 
-function drawPhotoWindow(ctx, src, x, y, w, h, o, scale, pathFn) {
-  const pw = Math.max(1, Math.round(w * scale)), ph = Math.max(1, Math.round(h * scale));
-  const off = document.createElement('canvas'); off.width = pw; off.height = ph;
-  const oc = off.getContext('2d'); oc.imageSmoothingQuality = 'high';
-  drawFit(oc, src, pw, ph, o.fit);
-  grade(oc, pw, ph, o.filter);
-  if (o.filter.bars) {
-    const bh = Math.max(0, (ph - pw / 2.39) / 2);
-    oc.fillStyle = '#000'; oc.fillRect(0, 0, pw, bh); oc.fillRect(0, ph - bh, pw, bh);
-  }
-  ctx.save();
-  if (pathFn) { ctx.beginPath(); pathFn(ctx); ctx.clip(); }
-  ctx.drawImage(off, x, y, w, h);
-  ctx.restore();
-}
-
-/* ---------- template pieces ---------- */
-function drawLogo(ctx, o, x, y, size) {
-  if (o.logo) {
-    const iw = o.logo.naturalWidth || o.logo.width, ih = o.logo.naturalHeight || o.logo.height;
-    const s = Math.min(size / iw, size / ih), dw = iw * s, dh = ih * s;
-    ctx.drawImage(o.logo, x + (size - dw) / 2, y + (size - dh) / 2, dw, dh);
-    return;
-  }
-  ctx.save();
-  ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = o.accent; ctx.font = `400 ${size * .34}px "Anton", sans-serif`;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; setLS(ctx, 0);
-  ctx.fillText('OSN', x + size / 2, y + size / 2 + size * .02);
-  ctx.restore();
-}
-const titleFont = (o, s) => `${FONTS[o.font]} ${s}px "${o.font}", Impact, sans-serif`;
-function fitTitle(ctx, o, maxW, maxSize) {
-  ctx.font = titleFont(o, 100); setLS(ctx, 1.5);
-  const tw = ctx.measureText(o.title).width || 1;
-  return Math.min(100 * maxW / tw, maxSize);
-}
-
-function pageCover(ctx, W, H, src, o, scale) {
-  const m = W * .055;
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
-
-  // header
-  const lg = W * .075, hy = m * .8;
-  drawLogo(ctx, o, m, hy, lg);
-  ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillStyle = INK;
-  ctx.font = `700 ${W * .027}px "Barlow Condensed", sans-serif`; setLS(ctx, W * .004);
-  ctx.fillText(o.club.toUpperCase(), m + lg + W * .02, hy + lg / 2);
-  if (o.cat) {
-    ctx.font = `700 ${W * .03}px "Barlow Condensed", sans-serif`; setLS(ctx, W * .003);
-    const tw = ctx.measureText(o.cat).width, pw = tw + W * .05, ph = lg * .62;
-    const px = W - m - pw, py = hy + lg / 2 - ph / 2;
-    ctx.fillStyle = INK; rr(ctx, px, py, pw, ph, ph / 2); ctx.fill();
-    ctx.fillStyle = o.accent; ctx.textAlign = 'center';
-    ctx.fillText(o.cat, px + pw / 2 + W * .0015, py + ph / 2 + 1);
-  }
-
-  // geometry (title decides how tall the photo window can be)
-  const wx = m, ww = W - 2 * m, wy = hy + lg + W * .03;
-  const s = fitTitle(ctx, o, ww, H * .22);
-  ctx.font = titleFont(o, s); setLS(ctx, s * .015);
-  const cap = ctx.measureText(o.title).actualBoundingBoxAscent || s * .72;
-  const rowY = H - m * .9;
-  const baseline = rowY - W * .03;
-  const wh = Math.max(H * .3, baseline - cap * .82 - wy);
-
-  // photo window with cut corner
-  const cut = W * .11;
-  const path = c => { c.moveTo(wx, wy); c.lineTo(wx + ww - cut, wy); c.lineTo(wx + ww, wy + cut); c.lineTo(wx + ww, wy + wh); c.lineTo(wx, wy + wh); c.closePath(); };
-  drawPhotoWindow(ctx, src, wx, wy, ww, wh, o, scale, path);
-  ctx.fillStyle = o.accent;
-  ctx.beginPath(); ctx.moveTo(wx + ww - cut, wy); ctx.lineTo(wx + ww, wy); ctx.lineTo(wx + ww, wy + cut); ctx.closePath(); ctx.fill();
-  ctx.fillRect(wx, wy - W * .008, W * .1, W * .008);
-
-  // big title
-  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
-  ctx.font = titleFont(o, s); setLS(ctx, s * .015);
-  ctx.fillStyle = o.accent; ctx.fillText(o.title, wx + W * .012, baseline + W * .012);
-  ctx.lineJoin = 'round'; ctx.lineWidth = W * .008; ctx.strokeStyle = '#fff'; ctx.strokeText(o.title, wx, baseline);
-  ctx.fillStyle = INK; ctx.fillText(o.title, wx, baseline);
-
-  // bottom row
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = o.accent; ctx.fillRect(wx, rowY - W * .012, W * .024, W * .024);
-  ctx.fillStyle = INK; ctx.font = `700 ${W * .027}px "Barlow Condensed", sans-serif`; setLS(ctx, W * .004);
-  ctx.fillText(o.sub.toUpperCase(), wx + W * .04, rowY);
-  if (o.motto) {
-    ctx.textAlign = 'right'; setLS(ctx, 0);
-    ctx.font = `700 ${W * .034}px "Cairo", sans-serif`;
-    ctx.fillText(o.motto, W - m, rowY - W * .004);
-  }
-}
-
-function pageMinimal(ctx, W, H, src, o, scale) {
-  const m = W * .07;
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
-
-  // top row
-  const topY = m * .75;
-  ctx.textBaseline = 'middle'; ctx.fillStyle = INK;
-  ctx.font = `700 ${W * .024}px "Barlow Condensed", sans-serif`; setLS(ctx, W * .005);
-  ctx.textAlign = 'left'; ctx.fillText(o.club.toUpperCase(), m, topY);
-  ctx.textAlign = 'right'; ctx.fillText(o.cat.toUpperCase(), W - m, topY);
-  const ly = topY + W * .032;
-  ctx.fillStyle = INK; ctx.fillRect(m, ly, W - 2 * m, 1.5);
-  ctx.fillStyle = o.accent; ctx.fillRect(m, ly - 1.5, W * .1, 4.5);
-
-  // geometry
-  const ww = W - 2 * m * 1.35, wx = (W - ww) / 2;
-  const reserved = m * .8 + W * .14 + W * .06 + W * .03;
-  const top = ly + W * .045, avail = H - top - reserved;
-  const wh = Math.min(avail, ww * 1.6);
-  const wy = top + (avail - wh) / 2;
-  const gap = W * .014;
-
-  drawPhotoWindow(ctx, src, wx, wy, ww, wh, o, scale, c => c.rect(wx, wy, ww, wh));
-
-  // frame + corner ticks
-  ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
-  ctx.strokeRect(wx - gap, wy - gap, ww + 2 * gap, wh + 2 * gap);
-  ctx.strokeStyle = o.accent; ctx.lineWidth = W * .006; ctx.lineCap = 'butt';
-  const L = W * .045, fx = wx - gap, fy = wy - gap, fw = ww + 2 * gap, fh = wh + 2 * gap;
-  const tick = (x, y, dx, dy) => { ctx.beginPath(); ctx.moveTo(x + dx * L, y); ctx.lineTo(x, y); ctx.lineTo(x, y + dy * L); ctx.stroke(); };
-  tick(fx, fy, 1, 1); tick(fx + fw, fy, -1, 1); tick(fx, fy + fh, 1, -1); tick(fx + fw, fy + fh, -1, -1);
-
-  // row under frame
-  const r1 = fy + fh + W * .035;
-  ctx.textBaseline = 'middle'; ctx.fillStyle = INK;
-  ctx.font = `700 ${W * .024}px "Barlow Condensed", sans-serif`; setLS(ctx, W * .004);
-  ctx.textAlign = 'left'; ctx.fillText(o.sub.toUpperCase(), wx, r1);
-  if (o.motto) {
-    ctx.textAlign = 'right'; setLS(ctx, 0);
-    ctx.font = `700 ${W * .03}px "Cairo", sans-serif`;
-    ctx.fillText(o.motto, wx + ww, r1 - W * .004);
-  }
-
-  // bottom block
-  const base = H - m * .8;
-  const s = Math.min(W * .075, fitTitle(ctx, o, W * .6, W * .075));
-  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left'; ctx.fillStyle = INK;
-  ctx.font = titleFont(o, s); setLS(ctx, s * .015);
-  ctx.fillText(o.title, wx, base - W * .014);
-  ctx.fillStyle = o.accent; ctx.fillRect(wx, base - W * .002, W * .09, W * .006);
-  const lg = W * .08;
-  drawLogo(ctx, o, wx + ww - lg, base - lg, lg);
-}
-
-function overlayFor(page, o) { return page === 'cover' ? o.customCover : page === 'minimal' ? o.customPage2 : null; }
-function renderPage(src, page, o, scale) {
-  const ov = overlayFor(page, o);
-  let [W, H] = FORMATS[o.format];
-  if (ov) { W = 1080; H = Math.round(1080 * (ov.naturalHeight || ov.height) / (ov.naturalWidth || ov.width)); }
+/* photo (filtered) underneath, template overlay on top: exactly one design per photo */
+function renderPhoto(src, role, o, scale) {
+  const t = role === 'cover' ? ov.cover : ov.minimal;
+  const W = OUT_W, H = Math.round(W * t.naturalHeight / t.naturalWidth);
   const cv = document.createElement('canvas');
   cv.width = Math.round(W * scale); cv.height = Math.round(H * scale);
-  const ctx = cv.getContext('2d');
-  ctx.scale(cv.width / W, cv.height / H);
-  ctx.imageSmoothingQuality = 'high';
-  if (ov) { drawPhotoWindow(ctx, src, 0, 0, W, H, o, scale, null); ctx.drawImage(ov, 0, 0, W, H); }
-  else if (page === 'cover') pageCover(ctx, W, H, src, o, scale);
-  else if (page === 'minimal') pageMinimal(ctx, W, H, src, o, scale);
-  else drawPhotoWindow(ctx, src, 0, 0, W, H, o, scale, null);
+  const ctx = cv.getContext('2d'); ctx.imageSmoothingQuality = 'high';
+  drawFit(ctx, src, cv.width, cv.height, o.fit);
+  grade(ctx, cv.width, cv.height, o.filter);
+  ctx.drawImage(t, 0, 0, cv.width, cv.height);
   return cv;
 }
 
-/* ---------- fonts ---------- */
-const fontsReady = (async () => {
-  try {
-    const jobs = Object.entries(FONTS).map(([f, w]) => document.fonts.load(`${w} 100px "${f}"`, 'TRAINING'));
-    jobs.push(document.fonts.load('700 20px "Barlow Condensed"', 'OSN'));
-    jobs.push(document.fonts.load('700 20px "Cairo"', 'نربي قبل ما نعلم'));
-    await Promise.all(jobs);
-  } catch (e) { /* offline: fallback fonts */ }
+/* ---------- templates (default + custom) ---------- */
+const overlaysReady = (async () => {
+  for (const key of ['cover', 'minimal']) {
+    try { defaults[key] = await loadImg(DEFAULT_SRC[key]); } catch (e) { defaults[key] = null; }
+    let custom = null, data = null;
+    try { data = localStorage.getItem(LS_KEY[key]); if (data) custom = await loadImg(data); } catch (e) { custom = null; }
+    ov[key] = custom || defaults[key];
+    if (custom) $(key === 'cover' ? '#tpCover' : '#tpMin').src = data;
+  }
 })();
 
+function setCustomOverlay(key, file) {
+  const r = new FileReader();
+  r.onload = async () => {
+    try {
+      const img = await loadImg(r.result); ov[key] = img;
+      $(key === 'cover' ? '#tpCover' : '#tpMin').src = r.result;
+      try { localStorage.setItem(LS_KEY[key], r.result); } catch (e) { setStatus('القالب يعمل الآن، لكن حجمه كبير فلن يُحفظ للمرة القادمة.'); }
+      changed();
+    } catch (e) { setStatus('تعذّر قراءة صورة القالب.'); }
+  };
+  r.readAsDataURL(file);
+}
+function resetOverlay(key) {
+  try { localStorage.removeItem(LS_KEY[key]); } catch (e) { /* ignore */ }
+  ov[key] = defaults[key];
+  $(key === 'cover' ? '#tpCover' : '#tpMin').src = DEFAULT_SRC[key];
+  changed();
+}
+
 /* ---------- preview ---------- */
-let timer = 0, token = 0, ver = 0, prepared = null;
-function schedule() { ver++; clearTimeout(timer); timer = setTimeout(refresh, 60); }
+let timer = 0, token = 0;
+function schedule() { clearTimeout(timer); timer = setTimeout(refresh, 40); }
+function changed() { ver++; updateShareBtn(); schedule(); schedulePrep(); }
 
 async function refresh() {
   const my = ++token;
-  await fontsReady;
+  await overlaysReady;
   const it = state.items[state.cur];
   const src = it ? await ensureWork(it) : placeholder();
   if (my !== token) return;
-  const o = getOpts();
-  const map = { cover: '#sheetCover', minimal: '#sheetMin', photo: '#sheetPhoto' };
-  const sel = selectedPages();
-  for (const [page, id] of Object.entries(map)) {
-    const sheet = $(id);
-    sheet.style.display = sel.includes(page) ? '' : 'none';
-    if (sel.includes(page)) $('.holder', sheet).replaceChildren(renderPage(src, page, o, PREVIEW_SCALE));
-  }
+  if (!ov.cover || !ov.minimal) { setStatus('تعذّر تحميل ملفات القالب (cover.png و minimal.png). تأكد أنها مرفوعة في GitHub.'); return; }
+  const role = !it || state.cur === state.cover ? 'cover' : 'minimal';
+  $('#holder').replaceChildren(renderPhoto(src, role, getOpts(), PREVIEW_SCALE));
+  let cap;
+  if (state.compare) cap = 'قبل الفلتر (الصورة الأصلية داخل القالب)';
+  else if (state.hover) cap = 'معاينة الفلتر: ' + PRESETS[state.hover].name;
+  else if (!it) cap = 'معاينة تجريبية';
+  else if (role === 'cover') cap = state.coverManual ? 'الغلاف (اخترتَه أنت): يحمل TRAINING الكبير' : 'الغلاف (اختيار تلقائي: الأوضح والأفضل إضاءة): يحمل TRAINING الكبير';
+  else cap = 'القالب المينيماليست';
+  $('#cap').textContent = cap;
   $('#empty').style.display = it ? 'none' : '';
+  $('#setCover').hidden = !(it && state.cur !== state.cover);
+  $('#autoCover').hidden = !(it && state.coverManual && state.items.length > 1);
+  $('#cmp').hidden = !it;
 }
 
+/* ---------- filters UI: categories + live thumbnails ---------- */
+function renderCats() {
+  const holder = $('#cats');
+  for (const [key, label] of Object.entries(CATS)) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'chip' + (key === state.cat ? ' on' : ''); b.dataset.c = key; b.textContent = label;
+    b.addEventListener('click', () => { state.cat = key; $$('.chip').forEach(c => c.classList.toggle('on', c.dataset.c === key)); applyCat(); $('#presets').scrollTo({ left: 0 }); });
+    holder.append(b);
+  }
+}
+function applyCat() { $$('.pr').forEach(b => { const c = PRESETS[b.dataset.k].cat; b.hidden = !(state.cat === 'all' || c === 'all' || c === state.cat); }); }
 function renderPresetThumbs() {
   const holder = $('#presets');
   const src = state.items[state.cur]?.work || placeholder();
@@ -361,29 +363,30 @@ function renderPresetThumbs() {
       const c = document.createElement('canvas'); c.width = 96; c.height = 120;
       const s = document.createElement('span'); s.textContent = p.name;
       b.append(c, s); holder.append(b);
-      b.addEventListener('click', () => choosePreset(key));
+      b.addEventListener('click', () => { state.hover = null; choosePreset(key); });
+      b.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') { state.hover = key; schedule(); } });
+      b.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && state.hover) { state.hover = null; schedule(); } });
     }
+    applyCat();
   }
   for (const b of $$('.pr', holder)) {
     const key = b.dataset.k, c = $('canvas', b), x = c.getContext('2d');
     drawFit(x, src, 96, 120, 'cover');
-    grade(x, 96, 120, { ...PRESETS[key], intensity: 1, bars: false });
+    grade(x, 96, 120, { ...PRESETS[key], intensity: 1 });
     b.classList.toggle('on', key === state.preset);
   }
 }
-
 function choosePreset(key) {
   state.preset = key;
   const p = PRESETS[key];
-  $('#intensity').value = 100; $('#bri').value = 0; $('#con').value = 0; $('#sat').value = 0; $('#warm').value = 0;
-  $('#grain').value = Math.round(p.grain * 100); $('#vig').value = Math.round(p.vig * 100);
+  ['bri', 'con', 'sat', 'warm'].forEach(id => { $('#' + id).value = 0; });
+  $('#intensity').value = 100;
+  $('#grain').value = Math.round(p.grain * 100); $('#vig').value = Math.round(p.vig * 100); $('#sharp').value = Math.round(p.sharp * 100);
   syncOutputs(); $$('.pr').forEach(b => b.classList.toggle('on', b.dataset.k === key));
-  save(); schedule();
+  save(); changed();
 }
 
 /* ---------- photos list ---------- */
-function updateCount() { $('#count').textContent = `${state.items.length} صورة`; }
-
 function renderStrip() {
   const strip = $('#strip'); strip.replaceChildren();
   state.items.forEach((it, i) => {
@@ -391,277 +394,252 @@ function renderStrip() {
     const img = document.createElement('img'); img.src = it.url; img.alt = '';
     const x = document.createElement('button'); x.type = 'button'; x.textContent = '×'; x.title = 'حذف';
     x.addEventListener('click', e => { e.stopPropagation(); removeItem(i); });
-    d.append(img, x); d.addEventListener('click', () => select(i)); strip.append(d);
+    d.append(img, x);
+    if (i === state.cover) { const bg = document.createElement('div'); bg.className = 'bg'; bg.textContent = '⭐ غلاف'; d.append(bg); }
+    d.addEventListener('click', () => select(i));
+    strip.append(d);
   });
-  updateCount();
+  $('#count').textContent = `${state.items.length} صورة`;
+  $('#drop').classList.toggle('compact', state.items.length > 0);
+  $('.pics').classList.toggle('has', state.items.length > 0);
 }
-
 async function select(i) {
   state.cur = i;
   state.items.forEach((it, k) => { if (k !== i) it.work = null; });
   if (state.items[i]) await ensureWork(state.items[i]);
   renderStrip(); renderPresetThumbs(); schedule();
 }
-
 function removeItem(i) {
   const [it] = state.items.splice(i, 1); URL.revokeObjectURL(it.url);
-  select(state.items.length ? Math.min(i, state.items.length - 1) : -1);
+  if (!state.items.length) { state.cover = 0; state.coverManual = false; clearResults(); }
+  else if (i === state.cover) { state.coverManual = false; state.cover = Math.min(i, state.items.length - 1); pickCover(); }
+  else if (i < state.cover) state.cover--;
+  select(state.items.length ? Math.min(i, state.items.length - 1) : -1); changed();
 }
-
 function addFiles(list) {
   const files = [...list].filter(f => f.type.startsWith('image/'));
   if (!files.length) { setStatus('لم يتم العثور على صور صالحة (صيغة HEIC غير مدعومة في بعض المتصفحات).'); return; }
-  for (const f of files) state.items.push({ file: f, url: URL.createObjectURL(f), work: null });
-  select(state.cur >= 0 ? state.cur : 0);
+  const fresh = files.map(f => ({ file: f, url: URL.createObjectURL(f), work: null, score: null }));
+  if (!state.items.length) { state.cover = 0; state.coverManual = false; }
+  state.items.push(...fresh);
+  select(state.cur >= 0 ? state.cur : 0); changed();
+  scoreNew(fresh);
+}
+function clearAll() {
+  state.items.forEach(i => URL.revokeObjectURL(i.url)); state.items = []; state.cover = 0; state.coverManual = false;
+  clearResults(); select(-1); changed(); setStatus('');
 }
 
-/* ---------- export ---------- */
+/* ---------- status / lock ---------- */
 function setStatus(t) { $('#status').textContent = t; }
+function lock(on) { state.busy = on; $('#shareAll').disabled = on; $('#export').disabled = on; }
 function download(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30000);
 }
-const toBlob = (cv, q) => new Promise(r => cv.toBlob(r, 'image/jpeg', q));
-const pad = (n, l = 3) => String(n).padStart(l, '0');
 
-async function exportAll() {
-  if (state.busy) return;
-  if (!state.items.length) { setStatus('اختر صورًا أولاً.'); return; }
-  const pages = selectedPages();
-  if (!pages.length) { setStatus('اختر صفحة واحدة على الأقل (غلاف / مينيماليست / صورة فقط).'); return; }
-  state.busy = true; $('#export').disabled = true;
-  await fontsReady;
-  const o = getOpts(), q = +$('#quality').value / 100;
-  const useZip = typeof JSZip !== 'undefined';
-  const total = state.items.length * pages.length;
-  let done = 0, part = 1, zip = useZip ? new JSZip() : null, inZip = 0;
-
-  const flush = async () => {
-    if (!zip || !inZip) return;
-    setStatus('جاري إنشاء ملف ZIP…');
-    const blob = await zip.generateAsync({ type: 'blob' });
-    download(blob, `OSN_photos_${pad(part, 2)}.zip`);
-    part++; zip = new JSZip(); inZip = 0; await sleep(500);
-  };
-
-  try {
-    for (let i = 0; i < state.items.length; i++) {
-      const it = state.items[i];
-      const base = it.file.name.replace(/\.[^.]+$/, '').replace(/[^\w\u0600-\u06FF-]+/g, '_').slice(0, 40);
-      const bmp = await loadBitmap(it.file);
-      for (const page of pages) {
-        const cv = renderPage(bmp, page, o, 1);
-        const blob = await toBlob(cv, q);
-        const name = `${pad(i + 1)}_${base}_${page}.jpg`;
-        if (useZip) { zip.file(name, blob); inZip++; if (inZip >= ZIP_PART) await flush(); }
-        else { download(blob, name); await sleep(250); }
-        done++;
-        $('#barFill').style.width = (done / total * 100) + '%';
-        setStatus(`${done} / ${total}`);
-        await sleep(0);
-      }
-      if (bmp.close) bmp.close();
-    }
-    await flush();
-    setStatus(`تم! ${total} صورة جاهزة.`);
-  } catch (e) {
-    console.error(e); setStatus('حدث خطأ أثناء التصدير: ' + e.message);
-  } finally {
-    state.busy = false; $('#export').disabled = false;
-  }
-}
-
-/* ---------- custom overlays ---------- */
-function setOverlay(key, dataUrl) {
-  const prop = key === 'cover' ? 'customCover' : 'customPage2';
-  const lsk = key === 'cover' ? 'osn-cover' : 'osn-page2';
-  if (!dataUrl) { state[prop] = null; try { localStorage.removeItem(lsk); } catch (e) { /* ignore */ } schedule(); return; }
-  const img = new Image();
-  img.onload = () => {
-    state[prop] = img;
-    try { localStorage.setItem(lsk, dataUrl); } catch (e) { setStatus('الغلاف يعمل الآن، لكن حجمه كبير فلن يُحفظ للمرة القادمة.'); }
-    schedule();
-  };
-  img.onerror = () => setStatus('تعذّر قراءة صورة الغلاف.');
-  img.src = dataUrl;
-}
-
-/* ---------- share + results gallery ---------- */
-const safeBase = it => it.file.name.replace(/\.[^.]+$/, '').replace(/[^\w\u0600-\u06FF-]+/g, '_').slice(0, 40) || 'photo';
-const toFile = (blob, name) => new File([blob], name, { type: 'image/jpeg' });
-const canShareFiles = files => { try { return !!(navigator.canShare && navigator.canShare({ files })); } catch (e) { return false; } };
-const lockUI = on => { state.busy = on; ['#shareCur', '#prepAll', '#export'].forEach(s => { $(s).disabled = on; }); };
-
-async function shareFiles(files) {
-  if (!canShareFiles(files)) {
-    setStatus('المشاركة المباشرة غير مدعومة في هذا المتصفح. افتح التطبيق من الهاتف (Chrome أو Safari) أو استخدم الحفظ.');
-    return false;
-  }
-  try { await navigator.share({ files }); return true; }
-  catch (e) { if (e && e.name === 'AbortError') return false; throw e; }
-}
-function reportShareError(e) {
-  if (e && e.name === 'NotAllowedError') setStatus('الصور جاهزة. اضغط الزر مرة أخرى للمشاركة.');
-  else setStatus('تعذّرت المشاركة: ' + (e && e.message ? e.message : e));
-}
-
-async function shareCurrent() {
-  if (state.busy) return;
-  const it = state.items[state.cur];
-  if (!it) { setStatus('اختر صورة أولاً.'); return; }
-  const pages = selectedPages();
-  if (!pages.length) { setStatus('اختر صفحة واحدة على الأقل.'); return; }
-  let files;
-  if (prepared && prepared.v === ver && prepared.i === state.cur) files = prepared.files;
-  else {
-    lockUI(true); setStatus('جاري تجهيز الصور…');
-    try {
-      await fontsReady;
-      const o = getOpts(), q = +$('#quality').value / 100, bmp = await loadBitmap(it.file), base = safeBase(it);
-      files = [];
-      for (const page of pages) files.push(toFile(await toBlob(renderPage(bmp, page, o, 1), q), `${base}_${page}.jpg`));
-      if (bmp.close) bmp.close();
-      prepared = { v: ver, i: state.cur, files };
-    } catch (e) { console.error(e); setStatus('حدث خطأ أثناء التجهيز: ' + e.message); lockUI(false); return; }
-    lockUI(false);
-  }
-  try { const ok = await shareFiles(files); if (ok) setStatus('تمت المشاركة.'); }
-  catch (e) { reportShareError(e); }
-}
-
+/* ---------- build final images in the background (cover first, then the rest) ---------- */
 function clearResults() {
-  state.results.forEach(g => g.files.forEach(f => URL.revokeObjectURL(f.url)));
-  state.results = []; $('#rgrid').replaceChildren(); $('#results').hidden = true;
+  if (prepared) prepared.files.forEach(f => URL.revokeObjectURL(f.url));
+  prepared = null; $('#rgrid').replaceChildren(); $('#results').hidden = true; $('#barFill').style.width = '0'; updateShareBtn();
 }
-
-function addGroupCard(g) {
+function addCard(f) {
   $('#results').hidden = false;
   const d = document.createElement('div'); d.className = 'rc';
-  const imgs = document.createElement('div'); imgs.className = 'rimgs';
-  g.files.forEach(f => { const im = new Image(); im.src = f.url; im.alt = f.name; imgs.append(im); });
-  const row = document.createElement('div'); row.className = 'rb';
-  const sh = document.createElement('button'); sh.type = 'button'; sh.className = 'sh'; sh.textContent = g.files.length > 1 ? 'مشاركة الكل' : 'مشاركة';
-  sh.addEventListener('click', async () => {
-    try { const ok = await shareFiles(g.files.map(f => toFile(f.blob, f.name))); if (ok) setStatus('تمت المشاركة.'); }
-    catch (e) { reportShareError(e); }
-  });
-  const sv = document.createElement('button'); sv.type = 'button'; sv.className = 'sv'; sv.textContent = 'حفظ';
-  sv.addEventListener('click', async () => { for (const f of g.files) { download(f.blob, f.name); await sleep(400); } });
-  row.append(sh, sv); d.append(imgs, row); $('#rgrid').append(d);
+  const im = new Image(); im.src = f.url; im.alt = f.name;
+  const lb = document.createElement('div'); lb.className = 'lb'; lb.textContent = f.label;
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = 'حفظ';
+  b.addEventListener('click', () => download(f.blob, f.name));
+  d.append(im, lb, b); $('#rgrid').append(d);
+}
+function schedulePrep() {
+  clearTimeout(prepTimer);
+  if (!state.items.length || state.scoring) return;
+  prepTimer = setTimeout(() => { ensurePrepared().catch(e => console.error(e)); }, PREP_DELAY);
+}
+async function buildPrepared(v0) {
+  if (prepared) clearResults();
+  $('#rgrid').replaceChildren();
+  await overlaysReady;
+  if (!ov.cover || !ov.minimal) throw new Error('ملفات القالب غير محمّلة');
+  const o = getOpts(), q = +$('#quality').value / 100, order = orderedIdx(), files = [];
+  state.prepCount++; updateShareBtn();
+  try {
+    for (let k = 0; k < order.length; k++) {
+      if (v0 !== ver) return null;
+      const i = order[k], role = i === state.cover ? 'cover' : 'minimal';
+      const bmp = await loadBitmap(state.items[i].file);
+      const blob = await toBlob(renderPhoto(bmp, role, o, 1), q);
+      if (bmp.close) bmp.close();
+      if (v0 !== ver) return null;
+      const name = `OSN_${pad(k + 1)}${role === 'cover' ? '_cover' : ''}.jpg`;
+      const f = { name, blob, url: URL.createObjectURL(blob), label: role === 'cover' ? '⭐ الغلاف' : `صورة ${k + 1}`, file: new File([blob], name, { type: 'image/jpeg' }) };
+      files.push(f); addCard(f);
+      $('#barFill').style.width = ((k + 1) / order.length * 100) + '%';
+      setStatus(`جاري التجهيز ${k + 1} / ${order.length}`);
+      await sleep(0);
+    }
+    prepared = { v: v0, files, batches: null, batch: 0, ready: false };
+    setStatus('✓ كل الصور جاهزة، اضغط مشاركة.');
+    return prepared;
+  } finally { state.prepCount--; updateShareBtn(); }
+}
+function ensurePrepared() {
+  if (prepared && prepared.v === ver) return Promise.resolve(prepared);
+  if (prepPromise && prepVer === ver) return prepPromise;
+  prepVer = ver;
+  const pr = buildPrepared(ver).finally(() => { if (prepPromise === pr) prepPromise = null; });
+  prepPromise = pr; return pr;
+}
+async function getPrepared() {
+  for (let n = 0; n < 4; n++) { const p = await ensurePrepared(); if (p && p.v === ver) return p; }
+  return null;
 }
 
-async function prepareAll() {
+/* ---------- share (Facebook via the phone's share sheet, no account link) ---------- */
+const canShareFiles = files => { try { return !!(navigator.canShare && navigator.canShare({ files })); } catch (e) { return false; } };
+function makeBatches(files) {
+  let n = files.length;
+  while (n >= 1 && !canShareFiles(files.slice(0, n).map(f => f.file))) n = n > SHARE_BATCH ? SHARE_BATCH : n - 1;
+  if (n < 1) return null;
+  const out = []; for (let s = 0; s < files.length; s += n) out.push(files.slice(s, s + n));
+  return out;
+}
+function updateShareBtn() {
+  const b = $('#shareAll'), n = state.items.length, ok = !!(prepared && prepared.v === ver);
+  let t;
+  if (!n) t = 'مشاركة الكل على فيسبوك';
+  else if (ok && prepared.batches && prepared.batches.length > 1) t = `مشاركة الدفعة ${prepared.batch + 1} من ${prepared.batches.length}`;
+  else if (ok && prepared.ready) t = `اضغط للمشاركة الآن (${prepared.files.length} صورة)`;
+  else if (ok) t = `مشاركة الكل على فيسبوك (${n}) ✓`;
+  else if (state.prepCount > 0) t = `مشاركة الكل (${n}) · جاري التجهيز…`;
+  else t = `مشاركة الكل على فيسبوك (${n})`;
+  b.textContent = t; b.classList.toggle('ready', ok);
+}
+/* the share sheet must open inside the tap, so when the photos are ready nothing is awaited before navigator.share */
+function shareAll() {
   if (state.busy) return;
-  if (!state.items.length) { setStatus('اختر صورًا أولاً.'); return; }
-  const pages = selectedPages();
-  if (!pages.length) { setStatus('اختر صفحة واحدة على الأقل.'); return; }
-  lockUI(true); clearResults();
-  const total = state.items.length * pages.length; let done = 0;
+  if (!state.items.length) { setStatus('اختر صورك أولاً.'); return; }
+  if (prepared && prepared.v === ver) { doShare(prepared); return; }
+  slowShare();
+}
+async function slowShare() {
+  setStatus('جاري تجهيز الصور…');
+  let p;
+  try { p = await getPrepared(); } catch (e) { console.error(e); setStatus('حدث خطأ أثناء التجهيز: ' + e.message); return; }
+  if (!p) { setStatus('تغيّرت الإعدادات أثناء التجهيز. اضغط الزر مرة أخرى.'); return; }
+  doShare(p);
+}
+async function doShare(p) {
+  if (!p.batches) p.batches = makeBatches(p.files);
+  if (!p.batches) { setStatus('المشاركة المباشرة غير مدعومة في هذا المتصفح. افتح التطبيق من الهاتف (Chrome أو Safari) أو استخدم زر ZIP.'); updateShareBtn(); return; }
+  updateShareBtn();
+  const files = p.batches[p.batch].map(f => f.file);
   try {
-    await fontsReady;
-    const o = getOpts(), q = +$('#quality').value / 100;
-    for (let i = 0; i < state.items.length; i++) {
-      const it = state.items[i], base = safeBase(it), bmp = await loadBitmap(it.file), g = { files: [] };
-      for (const page of pages) {
-        const blob = await toBlob(renderPage(bmp, page, o, 1), q);
-        g.files.push({ name: `${String(i + 1).padStart(3, '0')}_${base}_${page}.jpg`, blob, url: URL.createObjectURL(blob) });
-        done++; $('#barFill').style.width = (done / total * 100) + '%'; setStatus(`${done} / ${total}`);
-        await sleep(0);
+    await navigator.share({ files });
+    p.batch++;
+    if (p.batch >= p.batches.length) { p.batch = 0; p.ready = false; setStatus('تمت مشاركة كل الصور.'); }
+    else setStatus(`تمت الدفعة ${p.batch} من ${p.batches.length}. اضغط الزر لمشاركة الدفعة التالية.`);
+  } catch (e) {
+    if (e && e.name === 'AbortError') setStatus('أُلغيت المشاركة.');
+    else if (e && e.name === 'NotAllowedError') { p.ready = true; setStatus('الصور جاهزة. اضغط الزر مرة أخرى للمشاركة.'); }
+    else setStatus('تعذّرت المشاركة: ' + (e && e.message ? e.message : e));
+  }
+  updateShareBtn();
+}
+
+/* ---------- ZIP ---------- */
+async function exportZip() {
+  if (state.busy) return;
+  if (!state.items.length) { setStatus('اختر صورك أولاً.'); return; }
+  lock(true);
+  try {
+    setStatus('جاري تجهيز الصور…');
+    const p = await getPrepared();
+    if (!p) { setStatus('تغيّرت الإعدادات أثناء التجهيز. اضغط الزر مرة أخرى.'); return; }
+    if (typeof JSZip === 'undefined') { for (const f of p.files) { download(f.blob, f.name); await sleep(400); } }
+    else {
+      let part = 1;
+      for (let s = 0; s < p.files.length; s += ZIP_PART) {
+        const zip = new JSZip(); p.files.slice(s, s + ZIP_PART).forEach(f => zip.file(f.name, f.blob));
+        setStatus('جاري إنشاء ملف ZIP…');
+        download(await zip.generateAsync({ type: 'blob', compression: 'STORE' }), `OSN_photos_${pad(part++)}.zip`);
+        await sleep(500);
       }
-      if (bmp.close) bmp.close();
-      state.results.push(g); addGroupCard(g);
     }
-    setStatus(`جاهزة: ${total} صورة. اضغط «مشاركة» تحت أي صورة في المعرض.`);
-    $('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  } catch (e) { console.error(e); setStatus('حدث خطأ أثناء التجهيز: ' + e.message); }
-  finally { lockUI(false); }
+    setStatus(`تم! ${p.files.length} صورة.`);
+  } catch (e) { console.error(e); setStatus('حدث خطأ: ' + e.message); }
+  finally { lock(false); }
 }
 
 /* ---------- persistence ---------- */
-const SAVE = ['title', 'sub', 'cat', 'club', 'motto', 'showMotto', 'font', 'format', 'fit', 'pgCover', 'pgMin', 'pgPhoto',
-  'intensity', 'bri', 'con', 'sat', 'warm', 'grain', 'vig', 'bars', 'quality'];
+const SAVE = ['fit', 'intensity', 'bri', 'con', 'sat', 'warm', 'grain', 'vig', 'sharp', 'quality'];
 function save() {
-  const d = {};
-  SAVE.forEach(id => { const e = $('#' + id); d[id] = e.type === 'checkbox' ? e.checked : e.value; });
-  d.accent = state.accent; d.preset = state.preset;
-  try { localStorage.setItem('osn-studio', JSON.stringify(d)); } catch (e) { /* ignore */ }
+  const d = {}; SAVE.forEach(id => { d[id] = $('#' + id).value; }); d.preset = state.preset;
+  try { localStorage.setItem('osn-studio-v2', JSON.stringify(d)); } catch (e) { /* ignore */ }
 }
 function restore() {
   try {
-    const d = JSON.parse(localStorage.getItem('osn-studio') || 'null');
-    if (d) {
-      SAVE.forEach(id => { if (id in d) { const e = $('#' + id); if (e.type === 'checkbox') e.checked = d[id]; else e.value = d[id]; } });
-      if (d.accent) state.accent = d.accent;
-      if (d.preset && PRESETS[d.preset]) state.preset = d.preset;
-    }
-    const logo = localStorage.getItem('osn-logo');
-    if (logo) setLogo(logo); else useDefaultLogo();
-    const c1 = localStorage.getItem('osn-cover'); if (c1) setOverlay('cover', c1);
-    const c2 = localStorage.getItem('osn-page2'); if (c2) setOverlay('page2', c2);
+    const d = JSON.parse(localStorage.getItem('osn-studio-v2') || 'null');
+    if (!d) return;
+    SAVE.forEach(id => { if (id in d) $('#' + id).value = d[id]; });
+    if (d.preset && PRESETS[d.preset]) state.preset = d.preset;
   } catch (e) { /* ignore */ }
 }
-function useDefaultLogo() {
-  if (!window.OSN_LOGO) { state.logoImg = null; schedule(); return; }
-  if (defaultLogo) { state.logoImg = defaultLogo; schedule(); return; }
-  const img = new Image();
-  img.onload = () => { defaultLogo = img; state.logoImg = img; schedule(); };
-  img.src = window.OSN_LOGO;
-}
-function setLogo(dataUrl) {
-  if (!dataUrl) { state.logoData = null; try { localStorage.removeItem('osn-logo'); } catch (e) { /* ignore */ } useDefaultLogo(); return; }
-  const img = new Image();
-  img.onload = () => { state.logoImg = img; state.logoData = dataUrl; try { localStorage.setItem('osn-logo', dataUrl); } catch (e) { /* ignore */ } schedule(); };
-  img.src = dataUrl;
-}
-
-/* ---------- UI wiring ---------- */
 function syncOutputs() { $$('.rng').forEach(l => { const r = $('input', l), o = $('output', l); if (o) o.textContent = r.value; }); }
-function syncAccentUI() {
-  $('#accentPick').value = state.accent;
-  $$('.sw button').forEach(b => b.classList.toggle('on', b.dataset.c.toLowerCase() === state.accent.toLowerCase()));
+
+/* ---------- install as an app (PWA: Android + iOS) ---------- */
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function initInstall() {
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    const had = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').catch(() => { /* ignore */ });
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (had) setStatus('تم تحديث التطبيق. أغلقه وافتحه من جديد لتفعيل التحديث.'); });
+  }
+  const btn = $('#installBtn'), hint = $('#iosHint');
+  if (isStandalone()) { btn.hidden = true; return; }
+  btn.hidden = false;
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; });
+  window.addEventListener('appinstalled', () => { btn.hidden = true; deferredInstall = null; setStatus('تم تثبيت التطبيق.'); });
+  btn.addEventListener('click', async () => {
+    if (deferredInstall) { deferredInstall.prompt(); try { await deferredInstall.userChoice; } catch (e) { /* ignore */ } deferredInstall = null; return; }
+    hint.textContent = isIOS()
+      ? 'في آيفون (Safari): اضغط زر المشاركة ⬆︎ في أسفل الشاشة ثم اختر «إضافة إلى الشاشة الرئيسية».'
+      : 'من قائمة المتصفح ⋮ اختر «تثبيت التطبيق» أو «إضافة إلى الشاشة الرئيسية».';
+    hint.hidden = !hint.hidden;
+  });
 }
 
+/* ---------- wiring ---------- */
 function init() {
-  restore();
-  if (!state.logoImg && !localStorage.getItem('osn-logo')) useDefaultLogo();
-  syncOutputs(); syncAccentUI();
-
+  restore(); syncOutputs();
   $('#files').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
   const drop = $('#drop');
   ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
   drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
-  $('#clear').addEventListener('click', () => { state.items.forEach(i => URL.revokeObjectURL(i.url)); state.items = []; select(-1); });
-
-  $$('.panel input:not([type=file]), .panel select').forEach(el => {
-    el.addEventListener('input', () => { syncOutputs(); save(); schedule(); });
-  });
-  $$('.sw button').forEach(b => b.addEventListener('click', () => { state.accent = b.dataset.c; syncAccentUI(); save(); schedule(); }));
-  $('#accentPick').addEventListener('input', e => { state.accent = e.target.value; syncAccentUI(); save(); schedule(); });
-
-  $('#logoFile').addEventListener('change', e => {
-    const f = e.target.files[0]; if (!f) return;
-    const r = new FileReader(); r.onload = () => setLogo(r.result); r.readAsDataURL(f);
-  });
-  $('#logoClear').addEventListener('click', () => { $('#logoFile').value = ''; setLogo(null); });
-
-  $('#export').addEventListener('click', exportAll);
-  $('#shareCur').addEventListener('click', shareCurrent);
-  $('#prepAll').addEventListener('click', prepareAll);
+  $('#clear').addEventListener('click', clearAll);
   $('#resClear').addEventListener('click', clearResults);
-  const readTo = (id, key) => $(id).addEventListener('change', e => {
-    const f = e.target.files[0]; if (!f) return;
-    const r = new FileReader(); r.onload = () => setOverlay(key, r.result); r.readAsDataURL(f);
-  });
-  readTo('#coverFile', 'cover'); readTo('#page2File', 'page2');
-  $('#coverClear').addEventListener('click', () => { $('#coverFile').value = ''; setOverlay('cover', null); });
-  $('#page2Clear').addEventListener('click', () => { $('#page2File').value = ''; setOverlay('page2', null); });
 
-  renderPresetThumbs();
-  updateCount();
-  fontsReady.then(schedule);
-  schedule();
+  SAVE.forEach(id => $('#' + id).addEventListener('input', () => { syncOutputs(); save(); if (id !== 'quality') changed(); else { ver++; updateShareBtn(); schedulePrep(); } }));
+
+  const pick = (inp, key) => $(inp).addEventListener('change', e => { const f = e.target.files[0]; if (f) setCustomOverlay(key, f); });
+  pick('#coverFile', 'cover'); pick('#minFile', 'minimal');
+  $('#coverClear').addEventListener('click', () => { $('#coverFile').value = ''; resetOverlay('cover'); });
+  $('#minClear').addEventListener('click', () => { $('#minFile').value = ''; resetOverlay('minimal'); });
+
+  $('#setCover').addEventListener('click', () => { state.cover = state.cur; state.coverManual = true; renderStrip(); changed(); });
+  $('#autoCover').addEventListener('click', () => { state.coverManual = false; pickCover(); });
+  const cmp = $('#cmp'), setCmp = on => { if (state.compare !== on) { state.compare = on; schedule(); } };
+  cmp.addEventListener('pointerdown', e => { e.preventDefault(); setCmp(true); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => cmp.addEventListener(ev, () => setCmp(false)));
+  cmp.addEventListener('contextmenu', e => e.preventDefault());
+  $('#shareAll').addEventListener('click', shareAll);
+  $('#export').addEventListener('click', exportZip);
+
+  initInstall();
+  renderCats(); renderPresetThumbs(); updateShareBtn(); schedule();
 }
-
 init();
 })();
