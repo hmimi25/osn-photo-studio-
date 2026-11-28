@@ -609,7 +609,8 @@ function shareFailed(e, p, direct) {
   if (!direct && nm === 'NotAllowedError') { setStatus('الصور جاهزة. اضغط الزر مرة أخرى للمشاركة.'); return; }
   if (!p) { banner(`تعذّرت مشاركة الصورة (${nm}): ${msg}`, 'warn'); return; }
   p.size = Math.max(1, Math.floor((p.size || SHARE_BATCH) / 2)); p.batches = null; p.batch = 0;
-  banner(`تعذّرت المشاركة (${nm}): ${msg}. اضغط الزر مرة أخرى: سيجرّب التطبيق عددًا أقل من الصور في كل مرة.`, 'warn');
+  const mb = (p.files.reduce((t, f) => t + f.blob.size, 0) / 1048576).toFixed(1);
+  banner(`تعذّرت المشاركة [${nm}] ${msg} (${p.files.length} صورة، ${mb} MB). اضغط الزر مرة أخرى: سيجرّب التطبيق نصف العدد. إن استمر الفشل استخدم «💾 حفظ الكل في المعرض».`, 'warn');
   setStatus('تعذّرت المشاركة. اضغط الزر لمحاولة جديدة بعدد أقل من الصور.');
 }
 async function doShare(p, direct) {
