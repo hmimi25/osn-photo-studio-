@@ -566,9 +566,9 @@ async function getPrepared() {
 /* ---------- share (Facebook via the phone's share sheet, no account link) ---------- */
 const canShareFiles = files => { try { return !!(navigator.canShare && navigator.canShare({ files })); } catch (e) { return false; } };
 function makeBatches(files, size) {
-  let n = Math.max(1, Math.min(size || SHARE_BATCH, files.length));
-  while (n >= 1 && !canShareFiles(files.slice(0, n).map(f => f.file))) n--;
-  if (n < 1) return null;
+  if (!navigator.share) return null;
+  /* no pre-check with canShare: try the whole set first, shrink only if the phone really refuses */
+  const n = Math.max(1, Math.min(size || files.length, files.length));
   const out = []; for (let s0 = 0; s0 < files.length; s0 += n) out.push(files.slice(s0, s0 + n));
   return out;
 }
@@ -579,11 +579,11 @@ function updateShareBtn() {
   const b = $('#shareAll'), n = state.items.length, ok = !!(prepared && prepared.v === ver), dirty = isDirty();
   const working = state.prepCount > 0 || prepTimerSet || state.scoring > 0;
   let t, dis = false;
-  if (!n) t = 'مشاركة الكل على فيسبوك';
+  if (!n) t = 'مشاركة الكل';
   else if (dirty) t = `✔ طبّق «${PRESETS[state.preset].name}» على الكل (${n})`;
-  else if (ok) t = prepared.batches && prepared.batches.length > 1 ? `مشاركة الدفعة ${prepared.batch + 1} من ${prepared.batches.length} ✓` : `مشاركة الكل على فيسبوك (${n}) ✓`;
+  else if (ok) t = prepared.batches && prepared.batches.length > 1 ? `مشاركة الدفعة ${prepared.batch + 1} من ${prepared.batches.length} ✓` : `مشاركة الكل (${n}) ✓`;
   else if (working) { t = `⏳ جاري تجهيز الصور… ${state.prog}`; dis = true; }
-  else t = `مشاركة الكل على فيسبوك (${n})`;
+  else t = `مشاركة الكل (${n})`;
   b.textContent = t; b.disabled = dis || state.busy;
   b.classList.toggle('ready', ok && !dirty); b.classList.toggle('apply', dirty);
   $$('.pr').forEach(x => x.classList.toggle('ap', n > 0 && !!state.applied && x.dataset.k === state.applied.preset));
@@ -698,7 +698,7 @@ function initInstall() {
 
 /* ---------- self-check: tells you which GitHub file is missing or old ---------- */
 const REQUIRED_IDS = ['files', 'drop', 'clear', 'count', 'strip', 'holder', 'cap', 'empty', 'presets', 'cats', 'cmp', 'setCover', 'autoCover',
-  'shareAll', 'export', 'status', 'barFill', 'rgrid', 'results', 'resClear', 'installBtn', 'iosHint', 'fit', 'quality', 'intensity', 'bri', 'con',
+  'shareAll', 'export', 'status', 'barFill', 'rgrid', 'results', 'resClear', 'saveAll', 'installBtn', 'iosHint', 'fit', 'quality', 'intensity', 'bri', 'con',
   'sat', 'warm', 'grain', 'sharp', 'vig', 'batch', 'tpCover', 'tpMin', 'coverFile', 'minFile', 'coverClear', 'minClear'];
 async function checkFiles() {
   if (!/^https?:$/.test(location.protocol) || navigator.onLine === false) return;
@@ -728,6 +728,12 @@ function init() {
   drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
   $('#clear').addEventListener('click', clearAll);
   $('#resClear').addEventListener('click', clearResults);
+  $('#saveAll').addEventListener('click', async () => {
+    const p = prepared && prepared.v === ver ? prepared : null;
+    if (!p) { setStatus('الصور لم تجهز بعد، انتظر قليلًا.'); return; }
+    for (let i = 0; i < p.files.length; i++) { download(p.files[i].blob, p.files[i].name); setStatus(`حفظ ${i + 1}/${p.files.length}`); await sleep(500); }
+    setStatus('تم حفظ كل الصور في المعرض. افتح فيسبوك ← منشور ← صورة، واختر كل الصور دفعة واحدة.');
+  });
 
   SAVE.forEach(id => $('#' + id).addEventListener('input', () => {
     syncOutputs(); save();

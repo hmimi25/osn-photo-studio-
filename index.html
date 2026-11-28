@@ -88,7 +88,7 @@ window.osnBanner=function(msg,level){
           <option value="1">صورة واحدة</option>
         </select>
       </label>
-      <p class="hint">إن لم يقبل فيسبوك عددًا كبيرًا من الصور في منشور واحد فقلّل هذا الرقم. كل المعالجة داخل متصفحك، والصور لا تُرفع لأي خادم.</p>
+      <p class="hint">إن رفض التطبيق المختار عددًا كبيرًا من الصور فقلّل هذا الرقم. كل المعالجة داخل متصفحك، والصور لا تُرفع لأي خادم.</p>
     </section>
   </aside>
 
@@ -135,7 +135,7 @@ window.osnBanner=function(msg,level){
     </section>
 
     <section class="results" id="results" hidden>
-      <div class="rhead"><h3>الصور الجاهزة</h3><button class="link" id="resClear" type="button">مسح المعرض</button></div>
+      <div class="rhead"><h3>الصور الجاهزة</h3><button class="link" id="saveAll" type="button">💾 حفظ الكل في المعرض</button><button class="link" id="resClear" type="button">مسح المعرض</button></div>
       <p class="hint">هذه هي الصور النهائية بالترتيب الذي ستُنشر به: الغلاف أولًا. يمكنك مشاركة أي صورة وحدها بزر «مشاركة» أو حفظها بزر «حفظ».</p>
       <div class="rgrid" id="rgrid"></div>
     </section>
@@ -147,7 +147,7 @@ window.osnBanner=function(msg,level){
   <p class="status" id="status"></p>
   <div class="bar"><i id="barFill"></i></div>
   <div class="dbtns">
-    <button class="cta" id="shareAll" type="button">مشاركة الكل على فيسبوك</button>
+    <button class="cta" id="shareAll" type="button">مشاركة الكل</button>
     <button class="cta alt" id="export" type="button">ZIP</button>
   </div>
 </div>
