@@ -103,7 +103,8 @@ button{touch-action:manipulation}
 .bar i{display:block;height:100%;width:0;background:var(--sky);transition:width .15s}
 .dbtns{display:flex;gap:10px;max-width:760px;margin:0 auto}
 .dbtns .cta{margin:0}
-#shareAll{flex:1;white-space:nowrap;padding-inline:8px}
+#shareAll{flex:1;white-space:normal;line-height:1.35;font-size:15px;min-height:52px;padding-inline:8px}
+#shareAll.apply{background:var(--sky);color:#001018}
 .pics.has .hint{display:none}
 #shareAll.ready{box-shadow:0 0 0 3px #e8ff0044}
 #export{flex:0 0 84px}
@@ -125,3 +126,16 @@ button{touch-action:manipulation}
 @media (display-mode:standalone){
   body{padding-top:max(env(safe-area-inset-top),0px)}
 }
+
+#osnBanner{position:sticky;top:0;z-index:50}
+#osnBanner p{margin:0;padding:10px 14px;padding-inline-end:42px;font-size:13px;line-height:1.7;color:#fff;position:relative}
+#osnBanner p.error{background:#b3261e}
+#osnBanner p.warn{background:#8a6d00}
+#osnBanner button{position:absolute;inset-inline-end:8px;top:5px;background:none;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer}
+.ver{font-size:11px;opacity:.65;margin-inline-start:4px}
+
+.rb{display:flex;gap:6px}
+.rc .rb button{flex:1;padding:8px 4px}
+.rc .rb .sh{background:var(--volt);color:#000;border-color:var(--volt)}
+.pr{position:relative}
+.pr.ap::after{content:'✓';position:absolute;top:6px;inset-inline-start:6px;width:18px;height:18px;border-radius:50%;background:var(--volt);color:#000;font-size:12px;font-weight:900;display:grid;place-items:center}

@@ -8,6 +8,7 @@
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0a0d12">
+<meta name="osn-version" content="6">
 <meta name="color-scheme" content="dark">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -18,7 +19,20 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=5">
+<script>
+window.osnBanner=function(msg,level){
+  var make=function(){
+    var b=document.getElementById('osnBanner');
+    if(!b){b=document.createElement('div');b.id='osnBanner';b.setAttribute('role','alert');document.body.insertBefore(b,document.body.firstChild);}
+    for(var i=0;i<b.children.length;i++){if(b.children[i].firstChild.nodeValue===msg)return;}
+    var p=document.createElement('p');p.className=level||'error';p.appendChild(document.createTextNode(msg));
+    var x=document.createElement('button');x.type='button';x.textContent='\u00d7';x.onclick=function(){p.parentNode&&p.parentNode.removeChild(p);};p.appendChild(x);
+    b.appendChild(p);
+  };
+  if(document.body)make();else document.addEventListener('DOMContentLoaded',make);
+};
+</script>
 </head>
 <body>
 <div class="app">
@@ -28,7 +42,7 @@
       <img class="mark" src="crest.png" alt="OSN">
       <div>
         <h1>استوديو صور OSN</h1>
-        <p>قالب النادي + فلاتر رياضية على كل صورك</p>
+        <p>قالب النادي + فلاتر رياضية على كل صورك <span class="ver" id="ver"></span></p>
       </div>
     </div>
     <button class="cta alt inst" id="installBtn" type="button" hidden>📲 ثبّت التطبيق على هاتفك</button>
@@ -63,9 +77,17 @@
     </section>
 
     <section class="card">
-      <h2>جودة الصور</h2>
+      <h2>الجودة والمشاركة</h2>
       <label class="rng"><span>الجودة</span><input type="range" id="quality" min="60" max="100" value="92"><output></output></label>
-      <p class="hint">كل المعالجة داخل متصفحك، والصور لا تُرفع لأي خادم.</p>
+      <label class="fld"><span>عدد الصور في كل مشاركة</span>
+        <select id="batch">
+          <option value="10" selected>10 صور (الافتراضي)</option>
+          <option value="5">5 صور</option>
+          <option value="3">3 صور</option>
+          <option value="1">صورة واحدة</option>
+        </select>
+      </label>
+      <p class="hint">إن لم يقبل فيسبوك عددًا كبيرًا من الصور في منشور واحد فقلّل هذا الرقم. كل المعالجة داخل متصفحك، والصور لا تُرفع لأي خادم.</p>
     </section>
   </aside>
 
@@ -97,7 +119,7 @@
       <h2>الفلاتر الرياضية والسينمائية</h2>
       <div class="cats" id="cats"></div>
       <div class="presets" id="presets"></div>
-      <p class="hint">كل فلتر يظهر مباشرة على صورتك قبل اختياره. على الحاسوب مرّر الفأرة فوقه لمعاينته.</p>
+      <p class="hint">كل فلتر يظهر مباشرة على صورتك قبل اختياره. عند اختيار فلتر يُطبَّق على الصورة المعروضة فقط لتكون المعاينة سريعة، ثم اضغط الزر الأزرق في الأسفل «طبّق على الكل» لتطبيقه على كل الصور.</p>
       <details class="adv">
         <summary>ضبط يدوي</summary>
         <label class="rng"><span>الشدة</span><input type="range" id="intensity" min="0" max="100" value="100"><output></output></label>
@@ -113,7 +135,7 @@
 
     <section class="results" id="results" hidden>
       <div class="rhead"><h3>الصور الجاهزة</h3><button class="link" id="resClear" type="button">مسح المعرض</button></div>
-      <p class="hint">هذه هي الصور النهائية بالترتيب الذي ستُنشر به: الغلاف أولًا. اضغط مطولًا على أي صورة لحفظها، أو استخدم زر «حفظ».</p>
+      <p class="hint">هذه هي الصور النهائية بالترتيب الذي ستُنشر به: الغلاف أولًا. يمكنك مشاركة أي صورة وحدها بزر «مشاركة» أو حفظها بزر «حفظ».</p>
       <div class="rgrid" id="rgrid"></div>
     </section>
   </main>
@@ -130,6 +152,18 @@
 </div>
 
 <script src="jszip.min.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=5"></script>
+<script>
+(function(){
+  if(window.OSN_VERSION==='6')return;
+  var show=function(){window.osnBanner&&window.osnBanner('\u26a0\ufe0f ملف app.js في GitHub قديم أو غير مرفوع. ارفع app.js الجديد من ملف ZIP ثم أعد فتح الصفحة.','error');};
+  var tried=false;try{tried=sessionStorage.getItem('osn-heal')==='1';}catch(e){}
+  if(tried||!('serviceWorker' in navigator)||!window.caches){show();return;}
+  try{sessionStorage.setItem('osn-heal','1');}catch(e){}
+  navigator.serviceWorker.getRegistrations().then(function(rs){return Promise.all(rs.map(function(r){return r.unregister();}));})
+    .then(function(){return caches.keys();}).then(function(ks){return Promise.all(ks.map(function(k){return caches.delete(k);}));})
+    .then(function(){location.reload();}).catch(show);
+})();
+</script>
 </body>
 </html>

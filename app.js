@@ -1,6 +1,23 @@
 (() => {
 'use strict';
 
+const APP_VERSION = '6';
+window.OSN_VERSION = APP_VERSION;
+const banner = (msg, level) => {
+  if (window.osnBanner) { window.osnBanner(msg, level); return; }
+  const make = () => {
+    let b = document.getElementById('osnBanner');
+    if (!b) { b = document.createElement('div'); b.id = 'osnBanner'; b.style.cssText = 'position:sticky;top:0;z-index:99'; document.body.insertBefore(b, document.body.firstChild); }
+    if ([...b.children].some(p => p.firstChild && p.firstChild.nodeValue === msg)) return;
+    const p = document.createElement('p');
+    p.style.cssText = 'margin:0;padding:10px 14px;font:13px/1.7 sans-serif;color:#fff;background:' + (level === 'warn' ? '#8a6d00' : '#b3261e');
+    p.appendChild(document.createTextNode(msg)); b.appendChild(p);
+  };
+  if (document.body) make(); else document.addEventListener('DOMContentLoaded', make);
+};
+window.addEventListener('error', e => { if (e.message && !/ResizeObserver/.test(e.message)) banner('حدث خطأ في التطبيق: ' + e.message, 'error'); });
+window.addEventListener('unhandledrejection', e => { const m = e.reason && (e.reason.message || String(e.reason)); if (m && !/Abort/.test(m)) banner('حدث خطأ في التطبيق: ' + m, 'error'); });
+
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -8,6 +25,16 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const smooth = (a, b, x) => { x = clamp((x - a) / (b - a)); return x * x * (3 - 2 * x); };
 const pad = (n, l = 2) => String(n).padStart(l, '0');
+const runSync = g => { let r; while (!(r = g.next()).done); return r.value; };
+/* runs a generator in slices so the page stays responsive while photos are rendered; returns null if aborted */
+async function runAsync(g, abort) {
+  let t = performance.now(), r;
+  while (!(r = g.next()).done) {
+    if (abort && abort()) return null;
+    if (performance.now() - t > 14) { await sleep(0); t = performance.now(); }
+  }
+  return r.value;
+}
 const toBlob = (cv, q) => new Promise(r => cv.toBlob(r, 'image/jpeg', q));
 
 const OUT_W = 1080;
@@ -79,29 +106,36 @@ const PRESETS = {
 };
 
 /* ---------- state ---------- */
-const state = { items: [], cur: -1, cover: 0, coverManual: false, preset: 'pro', cat: 'all', hover: null, compare: false, busy: false, prepCount: 0, scoring: 0 };
+const state = { items: [], cur: -1, cover: 0, coverManual: false, preset: 'pro', cat: 'all', hover: null, compare: false, busy: false, prepCount: 0, scoring: 0, applied: null, prog: '' };
 const ov = { cover: null, minimal: null };
 const defaults = { cover: null, minimal: null };
 let ver = 0, prepared = null, prepPromise = null, prepVer = -1, prepTimer = 0, placeholderCv = null, deferredInstall = null;
 
-/* ---------- options ---------- */
+/* ---------- options: the filter being previewed (draft) vs the one applied to every photo ---------- */
+const FILTER_IDS = ['intensity', 'bri', 'con', 'sat', 'warm', 'grain', 'vig', 'sharp'];
+const draftSnap = () => { const o = { preset: state.preset }; FILTER_IDS.forEach(id => { o[id] = +$('#' + id).value; }); return o; };
+const sameSnap = (a, b) => !!a && !!b && a.preset === b.preset && FILTER_IDS.every(id => a[id] === b[id]);
+function filterFrom(sn) {
+  const p = PRESETS[sn.preset] || PRESETS.none;
+  return {
+    ...p,
+    intensity: sn.intensity / 100,
+    bright: p.bright * (1 + sn.bri / 100),
+    contrast: p.contrast * (1 + sn.con / 100),
+    sat: p.sat * (1 + sn.sat / 100),
+    warm: p.warm + sn.warm / 100,
+    grain: sn.grain / 100,
+    vig: sn.vig / 100,
+    sharp: sn.sharp / 100
+  };
+}
 function getFilter() {
   if (state.compare) return { ...N, intensity: 0 };
   if (state.hover) return { ...PRESETS[state.hover], intensity: 1 };
-  const p = PRESETS[state.preset];
-  return {
-    ...p,
-    intensity: +$('#intensity').value / 100,
-    bright: p.bright * (1 + +$('#bri').value / 100),
-    contrast: p.contrast * (1 + +$('#con').value / 100),
-    sat: p.sat * (1 + +$('#sat').value / 100),
-    warm: p.warm + +$('#warm').value / 100,
-    grain: +$('#grain').value / 100,
-    vig: +$('#vig').value / 100,
-    sharp: +$('#sharp').value / 100
-  };
+  return filterFrom(draftSnap());
 }
-const getOpts = () => ({ fit: $('#fit').value, filter: getFilter() });
+/* preview uses the draft; the final images always use what was applied to all */
+const getOpts = final => ({ fit: $('#fit').value, filter: final && state.applied ? filterFrom(state.applied) : getFilter() });
 const orderedIdx = () => {
   const n = state.items.length; if (!n) return [];
   const c = Math.min(state.cover, n - 1);
@@ -188,7 +222,7 @@ async function scoreNew(list) {
 }
 
 /* ---------- grading ---------- */
-function boxBlur(src, w, h, r) {
+function* boxBlur(src, w, h, r) {
   const tmp = new Float32Array(w * h), out = new Float32Array(w * h), inv = 1 / (2 * r + 1);
   const pass = (a, b, horiz) => {
     const len = horiz ? w : h, cnt = horiz ? h : w, stride = horiz ? 1 : w, step = horiz ? w : 1;
@@ -201,11 +235,11 @@ function boxBlur(src, w, h, r) {
       }
     }
   };
-  pass(src, tmp, true); pass(tmp, out, false); pass(out, tmp, true); pass(tmp, out, false);
+  pass(src, tmp, true); yield; pass(tmp, out, false); yield; pass(out, tmp, true); yield; pass(tmp, out, false);
   return out;
 }
 
-function grade(ctx, w, h, f) {
+function* gradeSteps(ctx, w, h, f) {
   if (!(f.intensity > 0) && !f.grain && !f.vig && !f.sharp && !f.clarity && !f.glow) return;
   const id = ctx.getImageData(0, 0, w, h), d = id.data;
   const k = f.intensity, [sr, sg, sb] = f.shadow, [hr, hg, hb] = f.hi, fade = f.fade, warm = f.warm * 0.06, vg = f.vig;
@@ -234,16 +268,19 @@ function grade(ctx, w, h, f) {
       if (vg) { const dx = x - cx, v = 1 - vg * smooth(.35, 1, Math.sqrt(dx * dx + dy2) * inv) * .85; r *= v; g *= v; b *= v; }
       d[i] = r * 255; d[i + 1] = g * 255; d[i + 2] = b * 255;
     }
+    if ((y & 63) === 63) yield;
   }
   if (f.clarity || f.glow) {
     const n = w * h, Lf = new Float32Array(n);
     for (let p = 0, i = 0; p < n; p++, i += 4) Lf[p] = (d[i] * .2126 + d[i + 1] * .7152 + d[i + 2] * .0722) / 255;
-    const Lb = boxBlur(Lf, w, h, Math.max(2, Math.round(w * .02)));
+    yield;
+    const Lb = yield* boxBlur(Lf, w, h, Math.max(2, Math.round(w * .02)));
     for (let p = 0, i = 0; p < n; p++, i += 4) {
       const diff = Lf[p] - Lb[p], mid = Math.max(.2, 1 - Math.abs(Lf[p] - .5) * 1.2);
       const add = f.clarity * diff * 255 * mid * 1.1, gl = f.glow * Math.max(0, Lb[p] - .45) * 255;
       d[i] += add + gl; d[i + 1] += add + gl * .95; d[i + 2] += add + gl * .85;
     }
+    yield;
   }
   if (f.sharp) {
     const src = new Uint8ClampedArray(d), kk = f.sharp * 0.6, w4 = w * 4;
@@ -252,18 +289,25 @@ function grade(ctx, w, h, f) {
         const i = (y * w + x) * 4;
         for (let c = 0; c < 3; c++) { const j = i + c, v = src[j]; d[j] = v + kk * (4 * v - src[j - 4] - src[j + 4] - src[j - w4] - src[j + w4]); }
       }
+      if ((y & 63) === 63) yield;
     }
   }
   if (f.grain) {
     const amp = f.grain * 255 * 0.16;
-    for (let i = 0; i < d.length; i += 4) {
-      const l = (d[i] * .2126 + d[i + 1] * .7152 + d[i + 2] * .0722) / 255;
-      const n = (Math.random() - .5) * 2 * amp * (1 - Math.abs(l - .5) * 1.1);
-      d[i] += n; d[i + 1] += n; d[i + 2] += n;
+    for (let s0 = 0; s0 < d.length; s0 += 262144) {
+      const e0 = Math.min(d.length, s0 + 262144);
+      for (let i = s0; i < e0; i += 4) {
+        const l = (d[i] * .2126 + d[i + 1] * .7152 + d[i + 2] * .0722) / 255;
+        const n = (Math.random() - .5) * 2 * amp * (1 - Math.abs(l - .5) * 1.1);
+        d[i] += n; d[i + 1] += n; d[i + 2] += n;
+      }
+      yield;
     }
   }
   ctx.putImageData(id, 0, 0);
 }
+
+const grade = (ctx, w, h, f) => runSync(gradeSteps(ctx, w, h, f));
 
 function drawFit(ctx, img, w, h, mode) {
   const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
@@ -274,17 +318,19 @@ function drawFit(ctx, img, w, h, mode) {
 }
 
 /* photo (filtered) underneath, template overlay on top: exactly one design per photo */
-function renderPhoto(src, role, o, scale) {
+function* renderSteps(src, role, o, scale) {
   const t = role === 'cover' ? ov.cover : ov.minimal;
   const W = OUT_W, H = Math.round(W * t.naturalHeight / t.naturalWidth);
   const cv = document.createElement('canvas');
   cv.width = Math.round(W * scale); cv.height = Math.round(H * scale);
   const ctx = cv.getContext('2d'); ctx.imageSmoothingQuality = 'high';
   drawFit(ctx, src, cv.width, cv.height, o.fit);
-  grade(ctx, cv.width, cv.height, o.filter);
+  yield;
+  yield* gradeSteps(ctx, cv.width, cv.height, o.filter);
   ctx.drawImage(t, 0, 0, cv.width, cv.height);
   return cv;
 }
+const renderPhoto = (src, role, o, scale) => runSync(renderSteps(src, role, o, scale));
 
 /* ---------- templates (default + custom) ---------- */
 const overlaysReady = (async () => {
@@ -319,7 +365,7 @@ function resetOverlay(key) {
 /* ---------- preview ---------- */
 let timer = 0, token = 0;
 function schedule() { clearTimeout(timer); timer = setTimeout(refresh, 40); }
-function changed() { ver++; updateShareBtn(); schedule(); schedulePrep(); }
+function changed() { if (state.items.length < 2) state.applied = draftSnap(); ver++; updateShareBtn(); schedule(); schedulePrep(); }
 
 async function refresh() {
   const my = ++token;
@@ -327,7 +373,7 @@ async function refresh() {
   const it = state.items[state.cur];
   const src = it ? await ensureWork(it) : placeholder();
   if (my !== token) return;
-  if (!ov.cover || !ov.minimal) { setStatus('تعذّر تحميل ملفات القالب (cover.png و minimal.png). تأكد أنها مرفوعة في GitHub.'); return; }
+  if (!ov.cover || !ov.minimal) { banner('⚠️ تعذّر تحميل القالب: الملفان cover.png و minimal.png غير موجودين في مستودع GitHub. ارفعهما ثم أعد فتح الصفحة.', 'error'); return; }
   const role = !it || state.cur === state.cover ? 'cover' : 'minimal';
   $('#holder').replaceChildren(renderPhoto(src, role, getOpts(), PREVIEW_SCALE));
   let cap;
@@ -336,6 +382,7 @@ async function refresh() {
   else if (!it) cap = 'معاينة تجريبية';
   else if (role === 'cover') cap = state.coverManual ? 'الغلاف (اخترتَه أنت): يحمل TRAINING الكبير' : 'الغلاف (اختيار تلقائي: الأوضح والأفضل إضاءة): يحمل TRAINING الكبير';
   else cap = 'القالب المينيماليست';
+  if (isDirty() && !state.compare && !state.hover) cap += ' · معاينة على هذه الصورة فقط';
   $('#cap').textContent = cap;
   $('#empty').style.display = it ? 'none' : '';
   $('#setCover').hidden = !(it && state.cur !== state.cover);
@@ -383,7 +430,7 @@ function choosePreset(key) {
   $('#intensity').value = 100;
   $('#grain').value = Math.round(p.grain * 100); $('#vig').value = Math.round(p.vig * 100); $('#sharp').value = Math.round(p.sharp * 100);
   syncOutputs(); $$('.pr').forEach(b => b.classList.toggle('on', b.dataset.k === key));
-  save(); changed();
+  save(); onDraftChange();
 }
 
 /* ---------- photos list ---------- */
@@ -432,7 +479,7 @@ function clearAll() {
 
 /* ---------- status / lock ---------- */
 function setStatus(t) { $('#status').textContent = t; }
-function lock(on) { state.busy = on; $('#shareAll').disabled = on; $('#export').disabled = on; }
+function lock(on) { state.busy = on; $('#export').disabled = on; updateShareBtn(); }
 function download(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30000);
@@ -448,41 +495,61 @@ function addCard(f) {
   const d = document.createElement('div'); d.className = 'rc';
   const im = new Image(); im.src = f.url; im.alt = f.name;
   const lb = document.createElement('div'); lb.className = 'lb'; lb.textContent = f.label;
-  const b = document.createElement('button'); b.type = 'button'; b.textContent = 'حفظ';
-  b.addEventListener('click', () => download(f.blob, f.name));
-  d.append(im, lb, b); $('#rgrid').append(d);
+  const row = document.createElement('div'); row.className = 'rb';
+  const sh = document.createElement('button'); sh.type = 'button'; sh.textContent = 'مشاركة'; sh.className = 'sh';
+  sh.addEventListener('click', () => shareOne(f));
+  const sv = document.createElement('button'); sv.type = 'button'; sv.textContent = 'حفظ';
+  sv.addEventListener('click', () => download(f.blob, f.name));
+  row.append(sh, sv); d.append(im, lb, row); $('#rgrid').append(d);
 }
+let prepTimerSet = false;
+const onPrepError = e => { console.error(e); banner('تعذّر تجهيز الصور: ' + ((e && e.message) || e), 'error'); updateShareBtn(); };
 function schedulePrep() {
-  clearTimeout(prepTimer);
-  if (!state.items.length || state.scoring) return;
-  prepTimer = setTimeout(() => { ensurePrepared().catch(e => console.error(e)); }, PREP_DELAY);
+  clearTimeout(prepTimer); prepTimerSet = false;
+  if (state.items.length && !state.scoring) { prepTimerSet = true; prepTimer = setTimeout(() => { prepTimerSet = false; ensurePrepared().catch(onPrepError); }, PREP_DELAY); }
+  updateShareBtn();
+}
+/* "apply to all": only now are the other photos re-rendered with the previewed filter */
+function applyDraft() {
+  state.applied = draftSnap();
+  ver++; clearTimeout(prepTimer); prepTimerSet = false;
+  setStatus('جاري تطبيق الفلتر على كل الصور…');
+  if (state.items.length && !state.scoring) ensurePrepared().catch(onPrepError);
+  updateShareBtn(); schedule();
+}
+function onDraftChange() {
+  schedule();
+  if (state.items.length < 2) { state.applied = draftSnap(); if (state.items.length) changed(); }
+  updateShareBtn();
 }
 async function buildPrepared(v0) {
-  if (prepared) clearResults();
-  $('#rgrid').replaceChildren();
-  await overlaysReady;
-  if (!ov.cover || !ov.minimal) throw new Error('ملفات القالب غير محمّلة');
-  const o = getOpts(), q = +$('#quality').value / 100, order = orderedIdx(), files = [];
-  state.prepCount++; updateShareBtn();
+  state.prepCount++; state.prog = ''; updateShareBtn();
   try {
+    if (prepared) clearResults();
+    $('#rgrid').replaceChildren();
+    await overlaysReady;
+    if (!ov.cover || !ov.minimal) throw new Error('ملفات القالب غير محمّلة');
+    const o = getOpts(true), q = +$('#quality').value / 100, order = orderedIdx(), files = [];
     for (let k = 0; k < order.length; k++) {
       if (v0 !== ver) return null;
       const i = order[k], role = i === state.cover ? 'cover' : 'minimal';
       const bmp = await loadBitmap(state.items[i].file);
-      const blob = await toBlob(renderPhoto(bmp, role, o, 1), q);
+      const cv = await runAsync(renderSteps(bmp, role, o, 1), () => v0 !== ver);
       if (bmp.close) bmp.close();
+      if (!cv || v0 !== ver) return null;
+      const blob = await toBlob(cv, q);
       if (v0 !== ver) return null;
       const name = `OSN_${pad(k + 1)}${role === 'cover' ? '_cover' : ''}.jpg`;
       const f = { name, blob, url: URL.createObjectURL(blob), label: role === 'cover' ? '⭐ الغلاف' : `صورة ${k + 1}`, file: new File([blob], name, { type: 'image/jpeg' }) };
       files.push(f); addCard(f);
       $('#barFill').style.width = ((k + 1) / order.length * 100) + '%';
-      setStatus(`جاري التجهيز ${k + 1} / ${order.length}`);
+      state.prog = `${k + 1}/${order.length}`; setStatus(`جاري التجهيز ${state.prog}`); updateShareBtn();
       await sleep(0);
     }
-    prepared = { v: v0, files, batches: null, batch: 0, ready: false };
+    prepared = { v: v0, files, batches: null, batch: 0, size: null };
     setStatus('✓ كل الصور جاهزة، اضغط مشاركة.');
     return prepared;
-  } finally { state.prepCount--; updateShareBtn(); }
+  } finally { state.prepCount--; state.prog = ''; updateShareBtn(); }
 }
 function ensurePrepared() {
   if (prepared && prepared.v === ver) return Promise.resolve(prepared);
@@ -498,60 +565,78 @@ async function getPrepared() {
 
 /* ---------- share (Facebook via the phone's share sheet, no account link) ---------- */
 const canShareFiles = files => { try { return !!(navigator.canShare && navigator.canShare({ files })); } catch (e) { return false; } };
-function makeBatches(files) {
-  let n = files.length;
-  while (n >= 1 && !canShareFiles(files.slice(0, n).map(f => f.file))) n = n > SHARE_BATCH ? SHARE_BATCH : n - 1;
+function makeBatches(files, size) {
+  let n = Math.max(1, Math.min(size || SHARE_BATCH, files.length));
+  while (n >= 1 && !canShareFiles(files.slice(0, n).map(f => f.file))) n--;
   if (n < 1) return null;
-  const out = []; for (let s = 0; s < files.length; s += n) out.push(files.slice(s, s + n));
+  const out = []; for (let s0 = 0; s0 < files.length; s0 += n) out.push(files.slice(s0, s0 + n));
   return out;
 }
+const isDirty = () => state.items.length > 1 && !sameSnap(draftSnap(), state.applied);
+/* one big button: "apply to all" while the preview filter is not applied yet, otherwise "share all";
+   it stays disabled while photos are still being prepared, so a tap always finds them ready */
 function updateShareBtn() {
-  const b = $('#shareAll'), n = state.items.length, ok = !!(prepared && prepared.v === ver);
-  let t;
+  const b = $('#shareAll'), n = state.items.length, ok = !!(prepared && prepared.v === ver), dirty = isDirty();
+  const working = state.prepCount > 0 || prepTimerSet || state.scoring > 0;
+  let t, dis = false;
   if (!n) t = 'مشاركة الكل على فيسبوك';
-  else if (ok && prepared.batches && prepared.batches.length > 1) t = `مشاركة الدفعة ${prepared.batch + 1} من ${prepared.batches.length}`;
-  else if (ok && prepared.ready) t = `اضغط للمشاركة الآن (${prepared.files.length} صورة)`;
-  else if (ok) t = `مشاركة الكل على فيسبوك (${n}) ✓`;
-  else if (state.prepCount > 0) t = `مشاركة الكل (${n}) · جاري التجهيز…`;
+  else if (dirty) t = `✔ طبّق «${PRESETS[state.preset].name}» على الكل (${n})`;
+  else if (ok) t = prepared.batches && prepared.batches.length > 1 ? `مشاركة الدفعة ${prepared.batch + 1} من ${prepared.batches.length} ✓` : `مشاركة الكل على فيسبوك (${n}) ✓`;
+  else if (working) { t = `⏳ جاري تجهيز الصور… ${state.prog}`; dis = true; }
   else t = `مشاركة الكل على فيسبوك (${n})`;
-  b.textContent = t; b.classList.toggle('ready', ok);
+  b.textContent = t; b.disabled = dis || state.busy;
+  b.classList.toggle('ready', ok && !dirty); b.classList.toggle('apply', dirty);
+  $$('.pr').forEach(x => x.classList.toggle('ap', n > 0 && !!state.applied && x.dataset.k === state.applied.preset));
 }
+function onDockClick() { if (isDirty()) applyDraft(); else shareAll(); }
 /* the share sheet must open inside the tap, so when the photos are ready nothing is awaited before navigator.share */
 function shareAll() {
   if (state.busy) return;
   if (!state.items.length) { setStatus('اختر صورك أولاً.'); return; }
-  if (prepared && prepared.v === ver) { doShare(prepared); return; }
+  if (prepared && prepared.v === ver) { doShare(prepared, true); return; }
   slowShare();
 }
 async function slowShare() {
   setStatus('جاري تجهيز الصور…');
   let p;
-  try { p = await getPrepared(); } catch (e) { console.error(e); setStatus('حدث خطأ أثناء التجهيز: ' + e.message); return; }
+  try { p = await getPrepared(); } catch (e) { onPrepError(e); return; }
   if (!p) { setStatus('تغيّرت الإعدادات أثناء التجهيز. اضغط الزر مرة أخرى.'); return; }
-  doShare(p);
+  doShare(p, false);
 }
-async function doShare(p) {
-  if (!p.batches) p.batches = makeBatches(p.files);
-  if (!p.batches) { setStatus('المشاركة المباشرة غير مدعومة في هذا المتصفح. افتح التطبيق من الهاتف (Chrome أو Safari) أو استخدم زر ZIP.'); updateShareBtn(); return; }
-  updateShareBtn();
-  const files = p.batches[p.batch].map(f => f.file);
-  try {
-    await navigator.share({ files });
-    p.batch++;
-    if (p.batch >= p.batches.length) { p.batch = 0; p.ready = false; setStatus('تمت مشاركة كل الصور.'); }
-    else setStatus(`تمت الدفعة ${p.batch} من ${p.batches.length}. اضغط الزر لمشاركة الدفعة التالية.`);
-  } catch (e) {
-    if (e && e.name === 'AbortError') setStatus('أُلغيت المشاركة.');
-    else if (e && e.name === 'NotAllowedError') { p.ready = true; setStatus('الصور جاهزة. اضغط الزر مرة أخرى للمشاركة.'); }
-    else setStatus('تعذّرت المشاركة: ' + (e && e.message ? e.message : e));
+function shareFailed(e, p, direct) {
+  const nm = (e && e.name) || 'Error', msg = (e && e.message) || String(e);
+  if (nm === 'AbortError') { setStatus('أُلغيت المشاركة.'); return; }
+  if (!direct && nm === 'NotAllowedError') { setStatus('الصور جاهزة. اضغط الزر مرة أخرى للمشاركة.'); return; }
+  if (!p) { banner(`تعذّرت مشاركة الصورة (${nm}): ${msg}`, 'warn'); return; }
+  p.size = Math.max(1, Math.floor((p.size || SHARE_BATCH) / 2)); p.batches = null; p.batch = 0;
+  banner(`تعذّرت المشاركة (${nm}): ${msg}. اضغط الزر مرة أخرى: سيجرّب التطبيق عددًا أقل من الصور في كل مرة.`, 'warn');
+  setStatus('تعذّرت المشاركة. اضغط الزر لمحاولة جديدة بعدد أقل من الصور.');
+}
+async function doShare(p, direct) {
+  if (!p.batches) {
+    p.batches = makeBatches(p.files, p.size || Math.min(+$('#batch').value || SHARE_BATCH, p.files.length));
+    if (p.batches) p.size = p.batches[0].length;
   }
+  if (!p.batches) { banner('المشاركة المباشرة غير مدعومة في هذا المتصفح. افتح التطبيق من الهاتف (Chrome أو Safari) أو استخدم زر ZIP.', 'warn'); updateShareBtn(); return; }
   updateShareBtn();
+  try {
+    await navigator.share({ files: p.batches[p.batch].map(f => f.file) });
+    p.batch++;
+    if (p.batch >= p.batches.length) { p.batch = 0; setStatus('تمت مشاركة كل الصور.'); }
+    else setStatus(`تمت الدفعة ${p.batch} من ${p.batches.length}. اضغط الزر لمشاركة الدفعة التالية.`);
+  } catch (e) { shareFailed(e, p, direct); }
+  updateShareBtn();
+}
+async function shareOne(f) {
+  if (!canShareFiles([f.file])) { setStatus('المشاركة المباشرة غير مدعومة هنا. استخدم «حفظ».'); return; }
+  try { await navigator.share({ files: [f.file] }); setStatus('تمت مشاركة الصورة.'); } catch (e) { shareFailed(e, null, true); }
 }
 
 /* ---------- ZIP ---------- */
 async function exportZip() {
   if (state.busy) return;
   if (!state.items.length) { setStatus('اختر صورك أولاً.'); return; }
+  if (isDirty()) { setStatus('اضغط «طبّق على الكل» أولًا حتى تشمل الصور المحفوظة الفلتر المعروض.'); return; }
   lock(true);
   try {
     setStatus('جاري تجهيز الصور…');
@@ -573,7 +658,7 @@ async function exportZip() {
 }
 
 /* ---------- persistence ---------- */
-const SAVE = ['fit', 'intensity', 'bri', 'con', 'sat', 'warm', 'grain', 'vig', 'sharp', 'quality'];
+const SAVE = ['fit', 'intensity', 'bri', 'con', 'sat', 'warm', 'grain', 'vig', 'sharp', 'quality', 'batch'];
 function save() {
   const d = {}; SAVE.forEach(id => { d[id] = $('#' + id).value; }); d.preset = state.preset;
   try { localStorage.setItem('osn-studio-v2', JSON.stringify(d)); } catch (e) { /* ignore */ }
@@ -611,9 +696,31 @@ function initInstall() {
   });
 }
 
+/* ---------- self-check: tells you which GitHub file is missing or old ---------- */
+const REQUIRED_IDS = ['files', 'drop', 'clear', 'count', 'strip', 'holder', 'cap', 'empty', 'presets', 'cats', 'cmp', 'setCover', 'autoCover',
+  'shareAll', 'export', 'status', 'barFill', 'rgrid', 'results', 'resClear', 'installBtn', 'iosHint', 'fit', 'quality', 'intensity', 'bri', 'con',
+  'sat', 'warm', 'grain', 'sharp', 'vig', 'batch', 'tpCover', 'tpMin', 'coverFile', 'minFile', 'coverClear', 'minClear'];
+async function checkFiles() {
+  if (!/^https?:$/.test(location.protocol) || navigator.onLine === false) return;
+  const missingOf = async list => {
+    const out = [];
+    await Promise.all(list.map(async f => { try { const r = await fetch(f, { method: 'HEAD', cache: 'no-store' }); if (!r.ok) out.push(f); } catch (e) { /* offline */ } }));
+    return out;
+  };
+  const [need, opt] = await Promise.all([
+    missingOf(['cover.png', 'minimal.png', 'crest.png', 'style.css']),
+    missingOf(['jszip.min.js', 'manifest.json', 'sw.js', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'favicon.png'])
+  ]);
+  if (need.length) banner('⚠️ ملفات ناقصة في مستودع GitHub: ' + need.join('، ') + '. ارفعها من ملف ZIP ثم أعد فتح الصفحة.', 'error');
+  else if (opt.length) banner('ملفات ناقصة في GitHub: ' + opt.join('، ') + ' (التطبيق يعمل، لكن التثبيت أو ZIP قد لا يعملان).', 'warn');
+}
+
 /* ---------- wiring ---------- */
 function init() {
-  restore(); syncOutputs();
+  const lost = REQUIRED_IDS.filter(id => !document.getElementById(id));
+  if (lost.length) { banner('⚠️ ملف index.html في GitHub قديم أو غير مكتمل. ارفع index.html الجديد من ملف ZIP ثم أعد فتح الصفحة.', 'error'); return; }
+  const v = $('#ver'); if (v) v.textContent = 'الإصدار ' + APP_VERSION;
+  restore(); syncOutputs(); state.applied = draftSnap();
   $('#files').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
   const drop = $('#drop');
   ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
@@ -622,7 +729,13 @@ function init() {
   $('#clear').addEventListener('click', clearAll);
   $('#resClear').addEventListener('click', clearResults);
 
-  SAVE.forEach(id => $('#' + id).addEventListener('input', () => { syncOutputs(); save(); if (id !== 'quality') changed(); else { ver++; updateShareBtn(); schedulePrep(); } }));
+  SAVE.forEach(id => $('#' + id).addEventListener('input', () => {
+    syncOutputs(); save();
+    if (FILTER_IDS.includes(id)) onDraftChange();
+    else if (id === 'quality') { ver++; updateShareBtn(); schedulePrep(); }
+    else if (id === 'batch') { if (prepared) { prepared.batches = null; prepared.batch = 0; prepared.size = null; } updateShareBtn(); }
+    else changed();
+  }));
 
   const pick = (inp, key) => $(inp).addEventListener('change', e => { const f = e.target.files[0]; if (f) setCustomOverlay(key, f); });
   pick('#coverFile', 'cover'); pick('#minFile', 'minimal');
@@ -635,11 +748,12 @@ function init() {
   cmp.addEventListener('pointerdown', e => { e.preventDefault(); setCmp(true); });
   ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => cmp.addEventListener(ev, () => setCmp(false)));
   cmp.addEventListener('contextmenu', e => e.preventDefault());
-  $('#shareAll').addEventListener('click', shareAll);
+  $('#shareAll').addEventListener('click', onDockClick);
   $('#export').addEventListener('click', exportZip);
 
   initInstall();
   renderCats(); renderPresetThumbs(); updateShareBtn(); schedule();
+  checkFiles();
 }
 init();
 })();
